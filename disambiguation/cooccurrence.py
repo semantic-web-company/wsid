@@ -146,7 +146,7 @@ def get_unbiased_dice_scores(relevant_tokens_score,
     """
     Get unbiased dice scores for cooccurrent tokens. Take expected cooccurrence
     count into account. expected_co_count = B * p_co,
-    score = 2*(AB - expected_co_count) / (A + B - 2*expected_co_count)
+    score = 2*(AB - expected_co_count) / (A + B)
 
     :param relevant_tokens_score: {token: score} scores of individual tokens.
     Score can either reflect the proximity to the entity or simply the number

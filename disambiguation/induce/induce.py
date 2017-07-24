@@ -22,7 +22,8 @@ th_co = 0.0
 
 
 def induce(texts, canonical_entity_form, method='hyperlex',
-           proximity='linear', cooc_method='unbiased_dice', w=35):
+           proximity='linear', cooc_method='unbiased_dice', w=35,
+           broaders=None):
     """
     Cluster the set of texts in order to identify different meanings of the
     entity.
@@ -91,7 +92,7 @@ def induce(texts, canonical_entity_form, method='hyperlex',
     G.add_weighted_edges_from(co_co_E)
     G_no_entity = G.copy()
     G_no_entity.remove_node(canonical_entity_form)
-    pr = nx.pagerank_scipy(G_no_entity)
+    pr = nx.pagerank_scipy(G_no_entity, tol=1.0e-15)
     logger.info('Number of nodes: {}, number of edges: {}'.format(
         len(G.nodes()), len(G.edges())
     ))
@@ -100,43 +101,23 @@ def induce(texts, canonical_entity_form, method='hyperlex',
     logger.info('Pagerank done in {:0.3f}s'.format(pr_time - co_co_time))
 
     if method == 'hyperlex':
-        hubs, clusters = hyperlex.get_hubs(
-            G, canonical_entity_form,
-            th_hub=1. / math.log(len(texts)),
-            pr=pr
-        )
+        if broaders is None:
+            hubs, clusters = hyperlex.get_hubs(
+                G, canonical_entity_form,
+                th_hub=1. / math.log(len(texts)),
+                pr=pr
+            )
+        else:
+            hubs, clusters = hyperlex.get_hubs_with_broaders(
+                G, canonical_entity_form,
+                th_hub=1. / math.log(len(texts)),
+                pr=pr,
+                broaders=broaders
+            )
     else:
         raise Exception()
     logger.info('Hubs done in {:0.3f}s'.format(time.time() - pr_time))
     return hubs, clusters, G, pr, cos
-
-
-def get_graph_figure(G, pagerank, nodesize_mult, edgewidth_mult, entity_name):
-    fig = plt.figure()
-    pos = nx.drawing.nx_agraph.graphviz_layout(G)
-    nodesize = [pagerank[v] * nodesize_mult for v in G.nodes()
-                if not v == entity_name]
-    edgewidth = [x[2] * edgewidth_mult for x in G.edges(data='weight')]
-    nx.draw_networkx_edges(G, pos, alpha=0.3, width=edgewidth, edge_color='m')
-    nx.draw_networkx_nodes(G, pos, node_size=nodesize, alpha=0.4)
-    nx.draw_networkx_labels(G, pos, fontsize=12)
-    plt.title('Word Senses Net: '.format(entity_name))
-    plt.axis('off')
-    return fig
-
-
-def get_plt2py_graph_div(G, pagerank, entity_name):
-    start = time.time()
-    import plotly.tools as tls
-    import plotly.offline as po
-    top_nodes = sorted(pagerank.items(),
-                       key=lambda x: x[1],
-                       reverse=True)[:50]
-    G_50 = G.subgraph([x[0] for x in top_nodes])
-    g_fig = get_graph_figure(G_50, pagerank, 2, 5, entity_name)
-    plotly_fig = tls.mpl_to_plotly(g_fig)
-    logger.info('Graph figure done in {:0.3f}s'.format(time.time() - start))
-    return po.plot(plotly_fig, auto_open=False, output_type='div')
 
 
 def plot_graph_degrees(G):
@@ -158,6 +139,36 @@ def plot_graph_degrees(G):
     plt.ylabel("weight")
     plt.xlabel("rank")
     plt.show()
+
+
+def get_graph_nodes_attributes(sense_clusters, colors, pr,
+                               limit_per_cluster=10):
+    nodes_colors = dict()
+    nodes_weights = dict()
+    for i in range(len(sense_clusters)):
+        sense_cluster = sense_clusters[i]
+        top_items = sorted(sense_cluster.items(),
+                           key=lambda x: x[1],
+                           reverse=True)[:limit_per_cluster]
+        top_words = {x[0] for x in top_items}
+        for word in top_words:
+            if word in nodes_colors:
+                if nodes_weights[word] <= sense_cluster[word]:
+                    nodes_colors[word] = colors[i]
+                    nodes_weights[word] = sense_cluster[word]
+            else:
+                nodes_colors[word] = colors[i]
+                nodes_weights[word] = sense_cluster[word]
+    c = 0
+    for node, node_pr in sorted(pr.items(), key=lambda x: x[1],
+                                reverse=True):
+        if node not in nodes_colors:
+            nodes_colors[node] = 'gray'
+            nodes_weights[node] = node_pr
+            c += 1
+        if c >= limit_per_cluster:
+            break
+    return nodes_colors, nodes_weights
 
 
 def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
@@ -257,6 +268,8 @@ def cluster_text(text, senses, entity, w=20):
         )
         distr = [sum(sense[x] * context[x] for x in context if x in sense)
                  for sense in senses]
+        # print(distr)
+        # print([len([x for x in context if x in sense]) for sense in senses])
         if not any(distr):
             print('Not possible to decide on category: no evidence!')
 
