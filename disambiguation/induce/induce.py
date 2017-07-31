@@ -22,7 +22,7 @@ th_co = 0.0
 
 
 def induce(texts, canonical_entity_form, method='hyperlex',
-           proximity='linear', cooc_method='unbiased_dice', w=35,
+           proximity='linear', cooc_method='unbiased_dice', w=15,
            broaders=None):
     """
     Cluster the set of texts in order to identify different meanings of the
@@ -44,7 +44,7 @@ def induce(texts, canonical_entity_form, method='hyperlex',
     start = time.time()
     new_texts = texts[:]
     if proximity == 'linear':
-        prox_func = lambda x: (w - abs(x) + 0.5) / w
+        prox_func = lambda x: 2*(w - abs(x) + 0.5) / w
     elif proximity == 'const':
         prox_func = lambda x: 1
     else:
@@ -68,10 +68,6 @@ def induce(texts, canonical_entity_form, method='hyperlex',
         for x in set(cos[term]) - order_2_cos:
             if len(set(cos[x]) & set_e_co) > neighbors_th:
                 order_2_cos.add(x)
-    # order_2_cos = {x for term in entity_co for x in cos[term]
-    #                if (x in set_e_co or
-    #                    len(set(cos[x]) & set_e_co) > neighbors_th)}
-    # order_2_cos = entity_co
     V = set(order_2_cos)
     assert canonical_entity_form in order_2_cos
     order2_time = time.time()
@@ -80,19 +76,22 @@ def induce(texts, canonical_entity_form, method='hyperlex',
 
     co_co_E = []
     for co1 in V:
-        denom = sum(cos[co1].values())
-        for co2 in set(cos[co1]) & set(V):
-            co_co_E.append((co1, co2, cos[co1][co2]/denom))
+        denom = sum([cos[co1][x] for x in (set(cos[co1]) & V)])
+        for co2 in (set(cos[co1]) & V):
+            # co_co_E.append((co1, co2, cos[co1][co2]))
+            co_co_E.append((co1, co2, cos[co1][co2] / denom))
     co_co_time = time.time()
     logger.info('Co2co done in {:0.3f}s'.format(co_co_time - order2_time))
 
     # COs are prepared now
-    G = nx.Graph()
+    G = nx.DiGraph()
     G.add_nodes_from(V)
     G.add_weighted_edges_from(co_co_E)
+    # for x in G:
+    #     assert 0.9 < sum(G[x][n]['weight'] for n in G[x]) < 1.1, (x, sum(G[x][n]['weight'] for n in G[x]))
     G_no_entity = G.copy()
     G_no_entity.remove_node(canonical_entity_form)
-    pr = nx.pagerank_scipy(G_no_entity, tol=1.0e-15)
+    pr = nx.pagerank_scipy(G_no_entity, tol=1.0e-10, max_iter=300)
     logger.info('Number of nodes: {}, number of edges: {}'.format(
         len(G.nodes()), len(G.edges())
     ))
@@ -259,7 +258,7 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
 
 def cluster_text(text, senses, entity, w=20):
     if len(senses) < 2:
-        return 0, 1
+        return 0, 1, [], []
     else:
         context, _ = cooc.get_relevant_tokens(
             text, w,
@@ -268,6 +267,7 @@ def cluster_text(text, senses, entity, w=20):
         )
         distr = [sum(sense[x] * context[x] for x in context if x in sense)
                  for sense in senses]
+        evidences = [[x for x in context if x in sense] for sense in senses]
         # print(distr)
         # print([len([x for x in context if x in sense]) for sense in senses])
         if not any(distr):
@@ -280,7 +280,7 @@ def cluster_text(text, senses, entity, w=20):
             if sorted_distr[1] else 0
         )
         conf = 1 - 1 / (1 + delta)
-        return result, conf
+        return result, conf, distr, evidences
 
 
 def compare_senses(senses):

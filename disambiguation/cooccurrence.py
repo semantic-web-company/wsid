@@ -1,5 +1,6 @@
 import re
 from collections import Counter, defaultdict
+import numpy as np
 
 from nltk import word_tokenize
 
@@ -116,6 +117,7 @@ def get_dice_scores(relevant_tokens_score,
                     all_tokens,
                     all_tokens_counter,
                     threshold,
+                    *args,
                     **kwargs):
     """
     Get dice scores for cooccurrent tokens.
@@ -226,5 +228,48 @@ def get_co(texts,
         token_params = [cos, all_tokens_counter[entity]] + params
         kwargs['entity'] = entity
         co_scores = func_method(*token_params, **kwargs)
+
+    return co_scores
+
+
+def get_co_text_averaged(texts,
+                         w,
+                         method='binom',
+                         proximity_func=lambda x: 1,
+                         threshold=0,
+                         forms_dict=None,
+                         entity=None,
+                         **kwargs):
+    assert len(texts) and not isinstance(texts, str)
+    if method == 'binom':
+        func_method = get_binom_scores
+    elif method == 'dice':
+        func_method = get_dice_scores
+    elif method == 'unbiased_dice':
+        func_method = get_unbiased_dice_scores
+    else:
+        raise Exception('Method {} is not supported'.format(method))
+    co_scores = defaultdict(lambda: defaultdict(list))
+    for i in range(len(texts)):
+        if forms_dict:
+            for form in forms_dict.keys():
+                subed_text = re.sub(form, forms_dict[form], texts[i])
+        else:
+            subed_text = texts[i]
+        t2t_cos_text, all_new_tokens = get_relevant_tokens(
+            subed_text, w, proximity_func,
+        )
+        new_tokens_counter = Counter(all_new_tokens)
+        for token in t2t_cos_text:
+            token_params = [
+                t2t_cos_text[token], new_tokens_counter[token],
+                all_new_tokens, new_tokens_counter, threshold, w
+            ]
+            res = func_method(*token_params, **kwargs)
+            for token2 in res:
+                co_scores[token][token2].append(res[token2])
+    for token1 in co_scores:
+        for token2 in co_scores[token1]:
+            co_scores[token1][token2] = np.mean(co_scores[token1][token2])
 
     return co_scores
