@@ -153,9 +153,11 @@ def get_unbiased_dice_scores(relevant_tokens_score,
     :param relevant_tokens_score: {token: score} scores of individual tokens.
     Score can either reflect the proximity to the entity or simply the number
     of occurrences.
+    :param entity_occurs: integer: number of times entity occurs
     :param all_tokens: list of all tokens
-    :param relevant_tokens_count: number of relevant tokens altogether
+    :param all_tokens_counter: counter of all tokens
     :param threshold: a threshold on dice score
+    :param w: size of the window
     :return: {token: unbiased_dice_score} dictionary
     """
     co_tokens = dict()

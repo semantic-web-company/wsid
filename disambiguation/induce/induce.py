@@ -103,7 +103,7 @@ def induce(texts, canonical_entity_form, method='hyperlex',
         if broaders is None:
             hubs, clusters = hyperlex.get_hubs(
                 G, canonical_entity_form,
-                th_hub=1. / math.log(len(texts)),
+                th_hub=1. / math.log2(len(texts)),
                 pr=pr
             )
         else:
@@ -179,7 +179,7 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
     edges = G.edges(data='weight')
     # scale width
     edges_width = MinMaxScaler(feature_range=(0, 7)).fit_transform(
-        [x[2] for x in edges]
+        np.array([x[2] for x in edges]).reshape(-1, 1)
     )
 
     edge_trace = go.Scatter(
