@@ -174,7 +174,7 @@ class CoVectorizer(CountVectorizer):
 
         for i, doc in enumerate(raw_documents):
             processed_doc = self.preprocess_text(doc)
-            local_words, _ = cooc.get_relevant_tokens(
+            local_words, _ = cooc.get_t2t_proximities(
                 processed_doc, w=self.w,
                 proximity_func=self.proximity_func
             )

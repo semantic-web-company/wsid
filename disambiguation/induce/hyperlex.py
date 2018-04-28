@@ -16,12 +16,19 @@ def get_hubs(G, entity_form, th_hub, pr=None):
         ranking = sorted(scoring_dict.items(), key=lambda y: y[1], reverse=True)
         return ranking
 
+    # for term in G[entity_form]:
+    #     print()
+    #     print(term)
+    #     print(G[entity_form][term])
+    #     print(G[term][entity_form])
+    assert entity_form in G
     entity_co = {
         term: G[term][entity_form]['weight']
         for term in G[entity_form]
         if term != entity_form
     }
-    G_wo_entity = G.copy()
+    # G_wo_entity = G.copy()
+    G_wo_entity = G
     G_wo_entity.remove_node(entity_form)
 
     if pr is None:
@@ -33,7 +40,8 @@ def get_hubs(G, entity_form, th_hub, pr=None):
     node_contrib = lambda x: (
         sum(G_wo_entity[x][n]['weight'] * left_nodes[n]
             for n in G_wo_entity.neighbors(x)) /
-        sum(G_wo_entity[x][n]['weight'] for n in G_wo_entity.neighbors(x))
+        sum(G_wo_entity[x][n]['weight']
+            for n in G_wo_entity.neighbors(x))
     )
     hubs = []
     clusters = []
@@ -44,9 +52,9 @@ def get_hubs(G, entity_form, th_hub, pr=None):
     ranking = get_ranking(G_wo_entity, scoring_func)
     while True:
         hub, score = ranking.pop(0)
-        print()
-        print(ranking[:3])
-        print(left_nodes[hub], score, th_hub)
+        # print()
+        # print(ranking[:3])
+        # print(left_nodes[hub], score, th_hub)
         if left_nodes[hub] > 0.5:
             if score > th_hub:
                 left_nodes[hub] = 0
@@ -76,11 +84,11 @@ def get_hubs(G, entity_form, th_hub, pr=None):
                         )
                     ) / np.sqrt(sum(
                         G_wo_entity[x][n]['weight'] for n in G_wo_entity[x]))
-                    if involvement > 1.1:
-                        print(x, involvement)
-                        print(sum(G[x][n]['weight'] for n in G[x]))
-                        print(len(common_neigh))
-                        print(x in common_neigh, hub in common_neigh)
+                    # if involvement > 1.1:
+                    #     print(x, involvement)
+                    #     print(sum(G[x][n]['weight'] for n in G[x]))
+                    #     print(len(common_neigh))
+                    #     print(x in common_neigh, hub in common_neigh)
                     assert involvement <= 1.1, (x, involvement)
 
                     cluster[x] = pr[x] * involvement * left_nodes[x]
@@ -118,7 +126,8 @@ def get_hubs_with_broaders(G, entity_form, th_hub, broaders, pr=None):
         for term in G[entity_form]
         if term != entity_form
     }
-    G_wo_entity = G.copy()
+    # G_wo_entity = G.copy()
+    G_wo_entity = G
     G_wo_entity.remove_node(entity_form)
 
     if pr is None:

@@ -28,7 +28,7 @@ class TestCooccurrence:
         words = self.text.split()
         words_counter = Counter(words)
         relevant_words, words = \
-            get_relevant_tokens(self.text, 10, proximity_func=lambda x: 1)
+            get_t2t_proximities(self.text, 10, proximity_func=lambda x: 1)
         relevant_words = relevant_words['A']
         entity_occurs = len([x for x in words if x == 'A'])
         p_co = sum(relevant_words.values()) / (len(words) - entity_occurs)
@@ -63,7 +63,7 @@ class TestCooccurrence:
             preproc.eliminate_symbols(self.cinnamon_text.lower())
         )
         relevant_words, words = \
-            get_relevant_tokens(
+            get_t2t_proximities(
                 cinnamon_text, w,
                 proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w
             )
@@ -83,7 +83,7 @@ class TestCooccurrence:
         )
         w = 20
         relevant_words_score, words = \
-            get_relevant_tokens(
+            get_t2t_proximities(
                 cinnamon_text, w,
                 proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w
             )
@@ -98,7 +98,7 @@ class TestCooccurrence:
         )
         w = 20
         relevant_words_score, words = \
-            get_relevant_tokens(
+            get_t2t_proximities(
                 sample_text, w,
                 proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w
             )

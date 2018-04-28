@@ -1,10 +1,10 @@
 from sklearn.preprocessing import Normalizer, MaxAbsScaler
-from sklearn.grid_search import GridSearchCV
+from sklearn.model_selection import GridSearchCV
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neighbors import NearestNeighbors
-from sklearn.cross_validation import cross_val_score
+# from sklearn.model_selection import cross_val_score
 import numpy as np
 
 from .preprocess import CoVectorizer

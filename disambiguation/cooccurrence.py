@@ -1,13 +1,18 @@
+import functools
+import logging
 import re
 from collections import Counter, defaultdict
-import numpy as np
 
+import numpy as np
+import scipy.sparse
 from nltk import word_tokenize
 
 __all__ = ['_calculate_z_score',
            'get_co',
-           'get_relevant_tokens',
+           'get_t2t_proximities',
            'get_binom_scores']
+
+module_logger = logging.getLogger(__name__)
 
 
 def _calculate_z_score(tokens_counter, term, p_co, relevant_tokens):
@@ -38,10 +43,11 @@ def _calculate_z_score(tokens_counter, term, p_co, relevant_tokens):
     return score
 
 
-def get_relevant_tokens(text,
+def get_t2t_proximities(tokens,
                         w,
                         proximity_func=lambda x: 1,
-                        entity=None):
+                        frequent_tokens=None,
+                        t2t_cos=None):
     """
     Get the relevant tokens in the sense of proximity. Extracts all the tokens
     that are within the window w from the entity and calculates their proximity
@@ -55,36 +61,28 @@ def get_relevant_tokens(text,
     :return: relevant_tokens_score: {token: proximity score}
     :return: tokens: all the tokens from the text after processing
     """
-    tokens = word_tokenize(text)
-
-    if entity is None:
+    if frequent_tokens is None:
+        frequent_tokens = set(tokens)
+    # n_tokens = len(frequent_tokens)
+    if t2t_cos is None:
         t2t_cos = defaultdict(lambda: defaultdict(int))
-        for this_ind, this_token in enumerate(tokens):
+    for this_ind, this_token in enumerate(tokens):
+        if this_token in frequent_tokens:
             for i in range(max(0, this_ind - w), this_ind):
                 token_ith = tokens[i]
-                distance = i - this_ind
-                # token ith to current token
-                t2t_cos[this_token][token_ith] += proximity_func(distance)
-                # current token to token ith
-                t2t_cos[token_ith][this_token] += proximity_func(distance)
-        return t2t_cos, tokens
-    else:
-        cos = defaultdict(int)
-        for this_ind, this_token in enumerate(tokens):
-            if this_token == entity:
-                for i in range(max(0, this_ind - w),
-                               min(this_ind + w, len(tokens))):
-                    if i == this_ind: continue
-                    token_ith = tokens[i]
-                    distance = abs(i - this_ind)
+                if token_ith in frequent_tokens:
+                    distance = i - this_ind
+                    prox_score = proximity_func(distance)
                     # token ith to current token
-                    cos[token_ith] += proximity_func(distance)
-        return cos, tokens
+                    t2t_cos[this_token][token_ith] += prox_score
+                    # current token to token ith
+                    t2t_cos[token_ith][this_token] += prox_score
+    return t2t_cos
 
 
 def get_binom_scores(relevant_tokens_score,
                      entity_occurs,
-                     all_tokens,
+                     n_all_tokens,
                      all_tokens_counter,
                      threshold,
                      w,
@@ -99,8 +97,8 @@ def get_binom_scores(relevant_tokens_score,
     :param relevant_tokens_count: number of relevant tokens altogether
     :return: {token: z_score} dictionary
     """
-    p_co = (2*entity_occurs*w / len(all_tokens)
-            if len(all_tokens) > 2*entity_occurs*w
+    p_co = (2*entity_occurs*w / n_all_tokens
+            if n_all_tokens > 2*entity_occurs*w
             else 1)
     assert 0 < p_co <= 1
     co_tokens = dict()
@@ -114,7 +112,7 @@ def get_binom_scores(relevant_tokens_score,
 
 def get_dice_scores(relevant_tokens_score,
                     entity_occurs,
-                    all_tokens,
+                    n_all_tokens,
                     all_tokens_counter,
                     threshold,
                     *args,
@@ -140,7 +138,7 @@ def get_dice_scores(relevant_tokens_score,
 
 def get_unbiased_dice_scores(relevant_tokens_score,
                              entity_occurs,
-                             all_tokens,
+                             n_all_tokens,
                              all_tokens_counter,
                              threshold,
                              w,
@@ -154,7 +152,7 @@ def get_unbiased_dice_scores(relevant_tokens_score,
     Score can either reflect the proximity to the entity or simply the number
     of occurrences.
     :param entity_occurs: integer: number of times entity occurs
-    :param all_tokens: list of all tokens
+    :param n_all_tokens: total number of tokens
     :param all_tokens_counter: counter of all tokens
     :param threshold: a threshold on dice score
     :param w: size of the window
@@ -165,11 +163,57 @@ def get_unbiased_dice_scores(relevant_tokens_score,
         A = entity_occurs
         B = all_tokens_counter[relevant_token]
         AB = relevant_tokens_score[relevant_token]
-        exp_co_count = 2*A*B*w / len(all_tokens)
+        exp_co_count = 2*A*B*w / n_all_tokens # len(all_tokens)
         co_score = (AB - exp_co_count) / (A + B)
         if co_score >= threshold:
             co_tokens[relevant_token] = co_score
     return co_tokens
+
+
+def dict2rcd(t2t_dict, t2i):
+    """
+    Transform dict of dict into sparse matrix.
+    :param t2t_dict: dict of dicts
+    :param t2i: token to index dictionary
+    :return: rows, cols, data lists
+    """
+    rows = []
+    cols = []
+    data = []
+    if t2t_dict:
+        for k0, d0 in t2t_dict.items():
+            k0_ind = t2i[k0]
+            for k1, v in d0.items():
+                rows.append(k0_ind)
+                cols.append(t2i[k1])
+                data.append(v)
+        # ans = scipy.sparse.csr_matrix((data, (rows, cols)),
+        #                               shape=(len(t2i), len(t2i)))
+        # return ans
+    # else:
+    #     return scipy.sparse.csr_matrix((len(t2i), len(t2i)))
+    return rows, cols, data
+
+
+def get_co_dict(t2t_prox, token2ind, ind2token, token):
+    """
+    Get cooc dict from sparse matrix for the specified token.
+    :param t2t_prox: sparse cooc matrix
+    :param token2ind: token 2 index dict
+    :param ind2token: index 2 token dict
+    :param token: the token
+    :return: dict of cooc for the token
+    """
+    token_ind = token2ind[token]
+    token_row = t2t_prox.getrow(token_ind).tocoo()
+    cols = token_row.col
+    data = token_row.data
+    ans = {
+        ind2token[cols_i]: data_i for cols_i, data_i in zip(cols, data)
+    }
+    # for col in token_row.nonzero()[1]:
+    #     ans[ind2token[col]] = token_row[0, col]
+    return ans
 
 
 def get_co(texts,
@@ -179,59 +223,120 @@ def get_co(texts,
            threshold=0,
            forms_dict=None,
            entity=None,
+           min_tf=None,
+           max_df=None,
+           dict_size_limit=5000,
            **kwargs):
     assert len(texts) and not isinstance(texts, str)
-    all_tokens = []
-    t2t_cos = defaultdict(lambda: defaultdict(int))
-    cos = defaultdict(int)
-    for i in range(len(texts)):
-        if forms_dict:
-            for form in forms_dict.keys():
-                subed_text = re.sub(form, forms_dict[form], texts[i])
-        else:
-            subed_text = texts[i]
-        if entity is None:
-            t2t_cos_text, all_new_tokens = \
-                get_relevant_tokens(
-                    subed_text, w, proximity_func,
-                )
-            all_tokens += all_new_tokens
-            for token1 in t2t_cos_text:
-                for token2 in t2t_cos_text[token1]:
-                    t2t_cos[token1][token2] += t2t_cos_text[token1][token2]
-        else:
-            cos_text, all_new_tokens = \
-                get_relevant_tokens(
-                    subed_text, w, proximity_func,
-                    entity=entity
-                )
-            all_tokens += all_new_tokens
-            for token in cos_text:
-                cos[token] += cos_text[token]
+    cache = functools.lru_cache()
+    proximity_func = cache(proximity_func)
+    texts_tokens, all_tokens_counter, df_tokens = get_tokens_and_counts(
+        texts=texts, forms_dict=forms_dict
+    )
+    # filter out rare tokens if min term freq is provided
+    if min_tf is not None:
+        tokens_counter = {
+            token: freq
+            for token, freq in all_tokens_counter.items()
+            if freq >= min_tf
+        }
+    else:
+        tokens_counter = dict(all_tokens_counter)
+    # filter out frequent token if max df is provided
+    if max_df is not None:
+        df_limit = len(texts)*max_df
+        tokens_counter = {
+            token: freq
+            for token, freq in tokens_counter.items()
+            if freq <= df_limit
+        }
+    else:
+        tokens_counter = dict(tokens_counter)
+    module_logger.info('Number of tokens: {}'.format(len(tokens_counter)))
+    tokens_set = set(tokens_counter)
 
-    all_tokens_counter = Counter(all_tokens)
+    t2t_prox = scipy.sparse.csr_matrix((len(tokens_set), len(tokens_set)))
+    token2ind = {token: i for i, token in enumerate(tokens_set)}
+    t2t_cos = defaultdict(lambda: defaultdict(float))
+    # accumulate token to token proximities over all tokenized texts
+    for i, tokens in enumerate(texts_tokens):
+        t2t_cos = get_t2t_proximities(tokens, w, proximity_func, tokens_set,
+                                      t2t_cos=t2t_cos)
+        if len(t2t_cos) > dict_size_limit:
+            rows, cols, data = dict2rcd(t2t_cos, token2ind)
+            t2t_prox += scipy.sparse.csr_matrix(
+                (data, (rows, cols)),
+                shape=(len(token2ind), len(token2ind))
+            )
+            t2t_cos.clear()
+        # if len(t2t_cos) > dict_size_limit:
+        #     t2t_text_sparse = dict2csr(t2t_cos, token2ind)
+        #     t2t_prox += t2t_text_sparse
+
+        if i % round(len(texts_tokens)/10) == 0:
+            module_logger.info('{} out of {} done'.format(i, len(texts_tokens)))
+    else:
+        rows, cols, data = dict2rcd(t2t_cos, token2ind)
+        t2t_prox += scipy.sparse.csr_matrix(
+            (data, (rows, cols)),
+            shape=(len(token2ind), len(token2ind))
+        )
+        t2t_cos.clear()
+        # t2t_text_sparse = dict2csr(t2t_cos, token2ind)
+        # t2t_prox += t2t_text_sparse
+        module_logger.info('All done')
+
+    n_all_tokens = sum(all_tokens_counter.values())
     if method == 'binom':
         func_method = get_binom_scores
-        params = [all_tokens, all_tokens_counter, threshold, w]
+        params = [n_all_tokens, all_tokens_counter, threshold, w]
     elif method == 'dice':
         func_method = get_dice_scores
-        params = [all_tokens, all_tokens_counter, threshold]
+        params = [n_all_tokens, all_tokens_counter, threshold]
     elif method == 'unbiased_dice':
         func_method = get_unbiased_dice_scores
-        params = [all_tokens, all_tokens_counter, threshold, w]
+        params = [n_all_tokens, all_tokens_counter, threshold, w]
     else:
         raise Exception('Method {} is not supported'.format(method))
-    co_scores = dict()
-    if entity is None:
-        for token in t2t_cos:
-            token_params = [t2t_cos[token], all_tokens_counter[token]] + params
-            co_scores[token] = func_method(*token_params, **kwargs)
-    else:
-        token_params = [cos, all_tokens_counter[entity]] + params
-        kwargs['entity'] = entity
-        co_scores = func_method(*token_params, **kwargs)
 
-    return co_scores
+    rows = []
+    cols = []
+    data = []
+    ind2token = {ind: token for token, ind in token2ind.items()}
+    for token, token_ind in token2ind.items():
+        token_cos_dict = get_co_dict(t2t_prox, token2ind, ind2token, token)
+        token_params = [token_cos_dict, all_tokens_counter[token]] + params
+        co_scores_dict = func_method(*token_params, **kwargs)
+        for k1, v in co_scores_dict.items():
+            rows.append(token_ind)
+            cols.append(token2ind[k1])
+            data.append(v)
+        co_scores_dict.clear()
+        token_cos_dict.clear()
+    co_scores = scipy.sparse.csr_matrix(
+        (data, (rows, cols)),
+        shape=(len(tokens_set), len(tokens_set)))
+    return co_scores, token2ind, ind2token
+
+
+def get_tokens_and_counts(texts, forms_dict=None):
+    texts_tokens = []
+    all_tokens = []
+    df_tokens = []
+    # tokenize and count tokens
+    for text in texts:
+        if forms_dict:
+            for form in forms_dict.keys():
+                subed_text = re.sub(form, forms_dict[form], text)
+        else:
+            subed_text = text
+        tokens = word_tokenize(subed_text)
+        texts_tokens.append(tokens)
+        all_tokens += tokens
+        df_tokens += set(tokens)
+    all_tokens_counter = Counter(all_tokens)
+    df_tokens = Counter(df_tokens)
+    return texts_tokens, all_tokens_counter, df_tokens
 
 
 def get_co_text_averaged(texts,
@@ -258,7 +363,7 @@ def get_co_text_averaged(texts,
                 subed_text = re.sub(form, forms_dict[form], texts[i])
         else:
             subed_text = texts[i]
-        t2t_cos_text, all_new_tokens = get_relevant_tokens(
+        t2t_cos_text, all_new_tokens = get_t2t_proximities(
             subed_text, w, proximity_func,
         )
         new_tokens_counter = Counter(all_new_tokens)
