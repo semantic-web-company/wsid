@@ -248,10 +248,10 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
     for i in range(len(edges)):
         x0, y0 = pos[edges[i][0]]
         x1, y1 = pos[edges[i][1]]
-        width = edges_width[i]
+        width = edges_width[i][0]
 
-        edge_trace['x'] += [x0, x1, None]
-        edge_trace['y'] += [y0, y1, None]
+        edge_trace['x'] += (x0, x1, None)
+        edge_trace['y'] += (y0, y1, None)
         edge_trace['hoverinfo'] = 'none'
         edge_trace['line']['width'] = width
         edge_trace['line']['color'] = '#888'
@@ -263,7 +263,7 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
         text=[],
         mode='markers',
         hoverinfo='text',
-        marker=go.Marker(
+        marker=go.scatter.Marker(
             color=[],
             size=[],
             line=dict(width=2)
@@ -280,11 +280,11 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
         )
         scaled_size = 40 * node_weights[node] / max_weight
 
-        node_trace['x'].append(x)
-        node_trace['y'].append(y)
-        node_trace['marker']['color'].append(nodes_colors[node])
-        node_trace['marker']['size'].append(scaled_size)
-        node_trace['text'].append(node_info)
+        node_trace['x'] += (x,)
+        node_trace['y'] += (y,)
+        node_trace['marker']['color'] += (nodes_colors[node],)
+        node_trace['marker']['size'] += (scaled_size,)
+        node_trace['text'] += (node_info,)
         ann_dict = {
             'x': x, 'y': y, 'text': str(node), 'showarrow': False
         }
@@ -300,10 +300,10 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
                         annotations=annotations,
-                        xaxis=go.XAxis(showgrid=False, zeroline=False,
-                                       showticklabels=False),
-                        yaxis=go.YAxis(showgrid=False, zeroline=False,
-                                       showticklabels=False))
+                        xaxis=go.layout.XAxis(showgrid=False, zeroline=False,
+                                              showticklabels=False),
+                        yaxis=go.layout.YAxis(showgrid=False, zeroline=False,
+                                              showticklabels=False))
                     )
     if not show_fig:
         output = 'div'
@@ -315,20 +315,20 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
 
 
 def cluster_text(text, senses, entity, w=20):
-    # TODO: debug
     if len(senses) < 2:
         return 0, 1, [], []
     else:
         t2t_cos = cooc.get_t2t_proximities(
-            text, w,
-            proximity_func=lambda x: (w - abs(x) + .5) / w,
+            text.split(), w,
+            # proximity_func=lambda x: (w - abs(x) + .5) / w,
         )
+        context = t2t_cos[entity]
         distr = [sum(sense[x] * context[x] for x in context if x in sense)
                  for sense in senses]
         evidences = [[x for x in context if x in sense] for sense in senses]
-        # print(distr)
-        # print([len([x for x in context if x in sense]) for sense in senses])
         if not any(distr):
+            print(text)
+            print(context)
             print('Not possible to decide on category: no evidence!')
 
         result = np.argmax(distr)
