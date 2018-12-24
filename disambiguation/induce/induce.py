@@ -2,7 +2,6 @@ import logging
 import math
 import time
 import numpy as np
-import matplotlib.pyplot as plt
 from functools import reduce
 
 import networkx as nx
@@ -312,33 +311,6 @@ def make_plotly_fig(G, node_weights, nodes_colors, fig_title='',
     return po.plot(fig, filename='networkx.html',
                    auto_open=show_fig,
                    output_type=output)
-
-
-def cluster_text(text, senses, entity, w=20):
-    if len(senses) < 2:
-        return 0, 1, [], []
-    else:
-        t2t_cos = cooc.get_t2t_proximities(
-            text.split(), w,
-            # proximity_func=lambda x: (w - abs(x) + .5) / w,
-        )
-        context = t2t_cos[entity]
-        distr = [sum(sense[x] * context[x] for x in context if x in sense)
-                 for sense in senses]
-        evidences = [[x for x in context if x in sense] for sense in senses]
-        if not any(distr):
-            print(text)
-            print(context)
-            print('Not possible to decide on category: no evidence!')
-
-        result = np.argmax(distr)
-        sorted_distr = sorted(distr, reverse=True)
-        delta = (
-            (sorted_distr[0] - sorted_distr[1]) / sorted_distr[1]
-            if sorted_distr[1] else 0
-        )
-        conf = 1 - 1 / (1 + delta)
-        return result, conf, distr, evidences
 
 
 def compare_senses(senses):
