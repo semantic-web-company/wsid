@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='disambiguation',
-    version='0.3',
+    version='0.0.3',
     packages=['disambiguation', 'tests'],
     url='',
     install_requires=[
@@ -12,8 +12,7 @@ setup(
         'scikit-learn>=0.17',
         'matplotlib>=1.4.3'
     ],
-    license='MIT',
     author='Artem Revenko (artreven)',
     author_email='artreven@gmail.com',
-    description='Disambiguation of word senses using cooccurent words and proximity measure'
+    description='Disambiguation of word senses using cooccurent words'
 )
