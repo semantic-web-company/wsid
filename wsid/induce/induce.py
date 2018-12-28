@@ -9,7 +9,7 @@ import scipy.sparse
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MinMaxScaler
 
-import disambiguation.cooccurrence as cooc
+import wsid.cooccurrence as cooc
 
 from . import hyperlex
 

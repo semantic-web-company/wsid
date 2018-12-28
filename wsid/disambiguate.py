@@ -1,5 +1,5 @@
 import numpy as np
-from disambiguation import cooccurrence as cooc
+from wsid import cooccurrence as cooc
 
 
 def classify_texts(corpus_texts, sense_clusters, entity, w):
