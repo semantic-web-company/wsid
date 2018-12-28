@@ -1,9 +1,9 @@
 from distutils.core import setup
 
 setup(
-    name='disambiguation',
+    name='wsid',
     version='0.0.3',
-    packages=['disambiguation', 'tests'],
+    packages=['wsid', 'tests'],
     url='',
     install_requires=[
         'nltk>=3.0.5',
@@ -14,5 +14,5 @@ setup(
     ],
     author='Artem Revenko (artreven)',
     author_email='artreven@gmail.com',
-    description='Disambiguation of word senses using cooccurent words'
+    description='Induction and disambiguation of word senses using cooccurent words'
 )
