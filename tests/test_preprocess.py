@@ -8,7 +8,7 @@ from nltk import word_tokenize
 dirname = os.path.dirname(os.path.realpath(__file__))
 datapath = dirname + '/data/'
 
-from disambiguation.preprocess import *
+from wsid.preprocess import *
 
 
 class TestTokensSubstitute:
