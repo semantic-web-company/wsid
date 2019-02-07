@@ -432,4 +432,3 @@ def get_co(texts_or_path,
     #     shape=(len(tokens_set), len(tokens_set)),
     #     dtype=np.float16)
     return co_scores, token2ind, ind2token
-'asd'.maketrans()
