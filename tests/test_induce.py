@@ -19,14 +19,14 @@ class TestInduce:
         self.cos, self.t2i, self.i2t = x3
 
     def test_get_graph(self):
-        G, e_es = induce.get_co_graph(
+        G, e_es = induce.get_co_graph_dict(
             self.cos, self.t2i, self.i2t,
             order_2_cos=list(self.t2i.keys()),
             canonical_entity_form='add')
         assert G
 
     def test_induce(self):
-        hubs, clusters, _, _, _ = induce.induce(
-            canonical_entity_form='add',
+        hubs, clusters, e_cos = induce.induce(
+            entity_str='add',
             cos=self.cos, ind2token=self.i2t, token2ind=self.t2i)
         assert hubs

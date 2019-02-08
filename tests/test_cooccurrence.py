@@ -207,12 +207,8 @@ class TestCooccurrence:
         )
         co_terms_10has = get_co_tokens(cos, t2i, i2t, entity)
         assert 'a' not in co_terms_10as
-        print(co_terms_10has['has'], co_terms['has'])
+        assert 'has' in co_terms_10has and 'has' in co_terms
         assert co_terms_10has['has'] / co_terms['has'] < 10
-
-    def test_unbiased_dice_co_co_frequency_change(self):
-        # How do I test this???
-        pass
 
     def test_unbiased_dice_co_triplicate_docs(self):
         entity = 'powder'

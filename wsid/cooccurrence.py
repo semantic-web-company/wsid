@@ -342,26 +342,26 @@ def get_co(texts_or_path,
         get_tokens_and_counts(texts=texts, forms_dict=forms_dict)
     # filter out rare tokens if min term freq is provided
     if min_df is not None:
-        tokens_counter = {
+        df_tokens_filter = {
             token: freq
             for token, freq in df_tokens.items()
             if freq >= min_df
         }
     else:
-        tokens_counter = dict(all_tokens_counter)
+        df_tokens_filter = dict(df_tokens)
     # filter out frequent token if max df is provided
     if max_df is not None:
         df_limit = len_texts*max_df
-        tokens_counter = {
+        df_tokens_filter = {
             token: freq
-            for token, freq in df_tokens.items()
+            for token, freq in df_tokens_filter.items()
             if freq <= df_limit
         }
     else:
-        tokens_counter = dict(tokens_counter)
-    module_logger.info(f'Number of tokens: {sum(tokens_counter.values())}')
-    module_logger.info(f'Total unique tokens: {len(tokens_counter)}')
-    tokens_set = set(tokens_counter)
+        df_tokens_filter = dict(df_tokens_filter)
+    module_logger.info(f'Number of tokens: {sum(df_tokens_filter.values())}')
+    module_logger.info(f'Total unique tokens: {len(df_tokens_filter)}')
+    tokens_set = set(df_tokens_filter)
 
     t2t_prox = scipy.sparse.csr_matrix((len(tokens_set), len(tokens_set)))
     token2ind = {token: i for i, token in enumerate(tokens_set)}
@@ -430,6 +430,17 @@ def get_co(texts_or_path,
             data.clear()
         if _10proc_tokens > 0 and i % _10proc_tokens == 0:
             module_logger.info('{} out of {} tokens done'.format(i, len(token2ind)))
+    else:
+        co_scores += scipy.sparse.csr_matrix(
+            (data, (rows, cols)),
+            shape=(len(tokens_set), len(tokens_set)),
+            dtype=np.float16
+        )
+        t2t_cos.clear()
+        rows.clear()
+        cols.clear()
+        data.clear()
+        module_logger.info('All done')
     module_logger.info(f'Total unique tokens: {len(tokens_set)}, '
                        f'total COs: {len(data)}')
     # data = np.asarray(data, dtype=np.float16)
