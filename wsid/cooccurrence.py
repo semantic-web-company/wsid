@@ -307,7 +307,7 @@ def get_co(texts_or_path,
     def iter_from_file(path):
         with open(path, 'rb') as f:
             for line in f:
-                yield line.decode('iso8859-15')
+                yield line
 
     def iter_from_folder(path):
         all_file_names = [
