@@ -272,7 +272,7 @@ def get_tokens_and_counts(texts, forms_dict=None):
 
 
 storage_folder = config('STORAGE_FOLDER', default='/tmp/diskcache')
-cache = FanoutCache('storage_folder')
+cache = FanoutCache(storage_folder)
 @cache.memoize(tag='get_co')
 def get_co(texts_or_path,
            w,
