@@ -271,10 +271,6 @@ def get_tokens_and_counts(texts, forms_dict=None):
     return all_tokens_counter, df_tokens, len_texts, iter_texts_tokens(temp_file_name)
 
 
-def const_proximity(*args):
-    return 1
-
-
 storage_folder = config('STORAGE_FOLDER', default='/tmp/diskcache')
 cache = FanoutCache('storage_folder')
 @cache.memoize(tag='get_co')
@@ -282,7 +278,8 @@ def get_co(texts_or_path,
            w,
            input_type='collection',
            method='unbiased_dice',
-           proximity_func=const_proximity,
+           proximity='const',
+           # proximity_func=const_proximity,
            threshold=0,
            forms_dict=None,
            entity=None,
@@ -297,7 +294,7 @@ def get_co(texts_or_path,
     :param int w: window size
     :param str input_type: "file_path", "folder_path" or "collection".
     :param str method:
-    :param (int) -> float proximity_func:
+    :param str proximity: "linear" or "const"
     :param float threshold:
     :param dict[str, list[str]] forms_dict: Alternative labels (synonyms)
     :param str entity: Ignored
@@ -328,8 +325,17 @@ def get_co(texts_or_path,
             texts = iter_from_file(texts_or_path)
         elif input_type is 'folder_path':
             texts = iter_from_folder(texts_or_path)
+        else:
+            raise ValueError(f'Input type "{input_type}" is not supported.')
     else:
         texts = texts_or_path
+
+    if proximity == 'const':
+        proximity_func = lambda x: 1
+    elif proximity == 'linear':
+        proximity_func = lambda x: (w - abs(x) + 0.5) * 2 / w
+    else:
+        raise ValueError(f'Proximity "{proximity}" is not supported.')
     cache = functools.lru_cache()
     proximity_func = cache(proximity_func)
     all_tokens_counter, df_tokens, len_texts, texts_tokens = \
