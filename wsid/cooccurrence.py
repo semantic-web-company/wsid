@@ -317,7 +317,7 @@ def get_co(texts_or_path,
         for file_path in all_file_names:
             with open(file_path, 'rb') as f:
                 f_text = f.read()
-            yield f_text.decode('iso8859-15')
+            yield f_text
 
     module_logger.info(f'Start get_co function')
     if input_type is not 'collection':
