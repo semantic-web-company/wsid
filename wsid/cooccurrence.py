@@ -307,7 +307,7 @@ def get_co(texts_or_path,
     def iter_from_file(path):
         with open(path, 'rb') as f:
             for line in f:
-                yield line
+                yield line.decode('ascii', errors='ignore')
 
     def iter_from_folder(path):
         all_file_names = [
@@ -317,7 +317,7 @@ def get_co(texts_or_path,
         for file_path in all_file_names:
             with open(file_path, 'rb') as f:
                 f_text = f.read()
-            yield f_text
+            yield f_text.decode('ascii', errors='ignore')
 
     module_logger.info(f'Start get_co function')
     if input_type is not 'collection':
