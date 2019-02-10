@@ -3,20 +3,21 @@ import logging
 import os
 import pickle
 import re
+import uuid
 from collections import Counter, defaultdict
 from tempfile import NamedTemporaryFile
 from pathlib import Path
 
 import numpy as np
 import scipy.sparse
+import array
 from decouple import config
 from nltk import word_tokenize
 from diskcache import FanoutCache
 
-__all__ = ['_calculate_z_score',
-           'get_co',
+__all__ = ['get_co',
            'get_t2t_proximities',
-           'get_binom_scores']
+           'texts2tokens']
 
 module_logger = logging.getLogger(__name__)
 
@@ -43,129 +44,108 @@ def save_cos(cos, t2i, i2t,
         pickle.dump(i2t, f)
 
 
-def _calculate_z_score(tokens_counter, term, p_co, relevant_tokens):
-    """
-    Calculate co-occurrence of entity and term. The calculated score is the Z
-    score, see (http://resources.esri.com/help/9.3/ArcGISDesktop/com/Gp_ToolRef/
-    spatial_statistics_toolbox/what_is_a_z_score_what_is_a_p_value.htm)
-
-    :param tokens_counter: Counter object counting words' appearances
-    :param term: the term for which the cooccurrence with the entity is
-    calculated
-    :param p_co: probability of cooccurrence by accident
-    :param relevant_tokens: words inside windows for all occurrences of
-    entitites with scores (dict)
-    :return: score calculated based on binomial distribution
-    """
-    token_count = tokens_counter[term]
-    assert token_count > 0
-    exp_co_count = p_co * token_count
-    std_dev = (token_count*p_co*(1 - p_co)) ** .5
-    if std_dev == 0:
-        score = 0
-    elif std_dev > 0:
-        co_count = relevant_tokens[term]
-        score = (co_count - exp_co_count) / std_dev
-    else:
-        assert False
-    return score
-
-
 def get_t2t_proximities(tokens,
+                        token2ind,
                         w,
                         proximity_func=lambda x: 1,
-                        frequent_tokens=None,
-                        t2t_cos=None):
+                        return_dict=False):
     """
     Get the relevant tokens in the sense of proximity. Extracts all the tokens
     that are within the window w from the entity and calculates their proximity
     score.
 
-    :param text: the processed text (one at a time).
-    :param entity_pattern: everything that matches the pattern is believed
-    to be the entity. Be sure to only find whole words.
-    :param w: window size.
-    :param proximity_func: proximity function.
-    :return: relevant_tokens_score: {token: proximity score}
-    :return: tokens: all the tokens from the text after processing
+    :param bool return_dict: if return should be dict.
+    :param dict[str, int] token2ind:
+    :param list[str] tokens:
+    :param int w: window size.
+    :param (int) -> float proximity_func: proximity function.
+    :rtype: (list[int], list[int], list[float]) or dict[str, dict[str, int]]
     """
-    if frequent_tokens is None:
-        frequent_tokens = set(tokens)
-    # n_tokens = len(frequent_tokens)
-    if t2t_cos is None:
+    if not return_dict:
+        ans_rows = []
+        ans_cols = []
+        ans_data = []
+    else:
         t2t_cos = defaultdict(lambda: defaultdict(int))
+
     for this_ind, this_token in enumerate(tokens):
-        if this_token in frequent_tokens:
+        if this_token in token2ind:
+            this_token_vocab_ind = token2ind[this_token]
             for i in range(max(0, this_ind - w), this_ind):
-                token_ith = tokens[i]
-                if token_ith in frequent_tokens:
+                ith_token = tokens[i]
+                if ith_token in token2ind:
                     distance = i - this_ind
                     prox_score = proximity_func(distance)
-                    # token ith to current token
-                    t2t_cos[this_token][token_ith] += prox_score
-                    # current token to token ith
-                    t2t_cos[token_ith][this_token] += prox_score
-    return t2t_cos
+                    if not return_dict:
+                        ith_token_vocab_ind = token2ind[ith_token]
+                        # current token to token ith
+                        ans_rows.append(this_token_vocab_ind)
+                        ans_cols.append(ith_token_vocab_ind)
+                        ans_data.append(prox_score)
+                        # ith token to current token
+                        ans_cols.append(this_token_vocab_ind)
+                        ans_rows.append(ith_token_vocab_ind)
+                        ans_data.append(prox_score)
+                    else:
+                        # token ith to current token
+                        t2t_cos[this_token][ith_token] += prox_score
+                        # current token to token ith
+                        t2t_cos[ith_token][this_token] += prox_score
+    if not return_dict:
+        return ans_rows, ans_cols, ans_data
+    else:
+        return t2t_cos
 
 
-def get_binom_scores(relevant_tokens_score,
-                     entity_occurs,
-                     n_all_tokens,
-                     all_tokens_counter,
-                     threshold,
-                     w,
-                     **kwargs):
-    """
-    Get binomial z scores for relevant tokens.
-
-    :param relevant_tokens_score: {token: score} scores of individual tokens.
-    Score can either reflect the proximity to the entity or simply the number
-    of occurrences.
-    :param all_tokens: list of all tokens
-    :param relevant_tokens_count: number of relevant tokens altogether
-    :return: {token: z_score} dictionary
-    """
-    p_co = (2*entity_occurs*w / n_all_tokens
-            if n_all_tokens > 2*entity_occurs*w
-            else 1)
-    assert 0 < p_co <= 1
-    co_tokens = dict()
-    for relevant_token in relevant_tokens_score:
-        score = _calculate_z_score(all_tokens_counter, relevant_token,
-                                   p_co, relevant_tokens_score)
-        if score >= threshold:
-            co_tokens[relevant_token] = score
-    return co_tokens
-
-
-def get_dice_scores(relevant_tokens_score,
-                    entity_occurs,
+def get_dice_scores(t2t_prox,
+                    token2ind,
+                    ind2token,
+                    entity_str,
                     n_all_tokens,
                     all_tokens_counter,
                     threshold,
-                    *args,
+                    w,
                     **kwargs):
     """
-    Get dice scores for cooccurrent tokens.
+    Get unbiased dice scores for cooccurrent tokens. Take expected cooccurrence
+    count into account. expected_co_count = B * p_co,
+    score = 2*(AB - expected_co_count) / (A + B)
 
-    :param relevant_tokens_score: {token: score} scores of individual tokens.
-    Score can either reflect the proximity to the entity or simply the number
-    of occurrences.
-    :param all_tokens: list of all tokens
-    :param threshold: a threshold on dice score
-    :return: {token: dice_score} dictionary
+    :param dict[str, int] token2ind:
+    :param dict[int, str] ind2token:
+    :param scipy.sparse.csr_matrix t2t_prox:
+    :param str entity_str: number of times entity occurs
+    :param int n_all_tokens: total number of tokens
+    :param collections.Counter all_tokens_counter: counter of all tokens
+    :param float threshold: a threshold on dice score
+    :param int w: size of the window
+    :return: rows, cols and values of co-occurrences
+    :rtype: (list[int], list[int], list[float])
     """
-    co_tokens = dict()
-    for relevant_token in relevant_tokens_score:
-        co_score = (relevant_tokens_score[relevant_token] /
-                    (entity_occurs + all_tokens_counter[relevant_token]))
+    e_ind = token2ind[entity_str]
+    e_row = t2t_prox.getrow(e_ind).tocoo()
+    cols = e_row.col
+    data = e_row.data
+    entity_occurs = all_tokens_counter[entity_str]
+    ans_rows = []
+    ans_cols = []
+    ans_data = []
+    for relevant_token_ind, AB in zip(cols, data):
+        A = entity_occurs
+        relevant_token_str = ind2token[relevant_token_ind]
+        B = all_tokens_counter[relevant_token_str]
+        co_score = AB / (A + B)
         if co_score >= threshold:
-            co_tokens[relevant_token] = co_score
-    return co_tokens
+            ans_rows.append(e_ind)
+            ans_cols.append(relevant_token_ind)
+            ans_data.append(co_score)
+    return ans_rows, ans_cols, ans_data
 
 
-def get_unbiased_dice_scores(relevant_tokens_score,
-                             entity_occurs,
+def get_unbiased_dice_scores(t2t_prox,
+                             token2ind,
+                             ind2token,
+                             entity_str,
                              n_all_tokens,
                              all_tokens_counter,
                              threshold,
@@ -176,116 +156,115 @@ def get_unbiased_dice_scores(relevant_tokens_score,
     count into account. expected_co_count = B * p_co,
     score = 2*(AB - expected_co_count) / (A + B)
 
-    :param relevant_tokens_score: {token: score} scores of individual tokens.
-    Score can either reflect the proximity to the entity or simply the number
-    of occurrences.
-    :param entity_occurs: integer: number of times entity occurs
-    :param n_all_tokens: total number of tokens
-    :param all_tokens_counter: counter of all tokens
-    :param threshold: a threshold on dice score
-    :param w: size of the window
-    :return: {token: unbiased_dice_score} dictionary
+    :param dict[str, int] token2ind:
+    :param dict[int, str] ind2token:
+    :param scipy.sparse.csr_matrix t2t_prox:
+    :param str entity_str: number of times entity occurs
+    :param int n_all_tokens: total number of tokens
+    :param collections.Counter all_tokens_counter: counter of all tokens
+    :param float threshold: a threshold on dice score
+    :param int w: size of the window
+    :return: rows, cols and values of co-occurrences
+    :rtype: (list[int], list[int], list[float])
     """
-    co_tokens = dict()
-    for relevant_token in relevant_tokens_score:
+    e_ind = token2ind[entity_str]
+    e_row = t2t_prox.getrow(e_ind).tocoo()
+    cols = e_row.col
+    data = e_row.data
+    entity_occurs = all_tokens_counter[entity_str]
+    ans_rows = []
+    ans_cols = []
+    ans_data = []
+    for relevant_token_ind, AB in zip(cols, data):
         A = entity_occurs
-        B = all_tokens_counter[relevant_token]
-        AB = relevant_tokens_score[relevant_token]
+        relevant_token_str = ind2token[relevant_token_ind]
+        B = all_tokens_counter[relevant_token_str]
+        # AB = data[relevant_token_ind]
         exp_co_count = 2*A*B*w / n_all_tokens # len(all_tokens)
         co_score = (AB - exp_co_count) / (A + B)
         if co_score >= threshold:
-            co_tokens[relevant_token] = co_score
-    return co_tokens
+            ans_rows.append(e_ind)
+            ans_cols.append(relevant_token_ind)
+            ans_data.append(co_score)
+    return ans_rows, ans_cols, ans_data
 
 
-def dict2rcd(t2t_dict, t2i):
-    """
-    Transform dict of dict into sparse matrix.
-    :param t2t_dict: dict of dicts
-    :param t2i: token to index dictionary
-    :return: rows, cols, data lists
-    """
-    rows = []
-    cols = []
-    data = []
-    if t2t_dict:
-        for k0, d0 in t2t_dict.items():
-            k0_ind = t2i[k0]
-            for k1, v in d0.items():
-                rows.append(k0_ind)
-                cols.append(t2i[k1])
-                data.append(v)
-    return rows, cols, data
-
-
-def get_co_dict(t2t_prox, token2ind, ind2token, token):
-    """
-    Get cooc dict from sparse matrix for the specified token.
-    :param t2t_prox: sparse cooc matrix
-    :param token2ind: token 2 index dict
-    :param ind2token: index 2 token dict
-    :param token: the token
-    :return: dict of cooc for the token
-    """
-    token_ind = token2ind[token]
-    token_row = t2t_prox.getrow(token_ind).tocoo()
-    cols = token_row.col
-    data = token_row.data
-    ans = {
-        ind2token[cols_i]: data_i for cols_i, data_i in zip(cols, data)
-    }
-    # for col in token_row.nonzero()[1]:
-    #     ans[ind2token[col]] = token_row[0, col]
-    return ans
-
-
-def get_tokens_and_counts(texts, forms_dict=None):
-    def iter_texts_tokens(dump_file_name):
-        with open(dump_file_name) as f:
-            for line in f:
-                yield line.split(', ')
-
-    all_tokens_counter = Counter()
-    df_tokens = Counter()
-    dump_file = NamedTemporaryFile(mode='w+', delete=False)
-    # tokenize and count tokens
-    for i, text in enumerate(texts):
-        if forms_dict:
-            for form in forms_dict.keys():
-                subed_text = re.sub(form, forms_dict[form], text)
+class IncrementalCSRMatrix(object):
+    def __init__(self, shape, dtype):
+        if dtype is np.int32:
+            type_flag = 'i'
+        elif dtype is np.int64:
+            type_flag = 'l'
+        elif dtype is np.float32:
+            type_flag = 'f'
+        elif dtype is np.float64:
+            type_flag = 'd'
         else:
-            subed_text = text
-        tokens = word_tokenize(subed_text)
-        tokens_s = ', '.join(tokens) + '\n'
-        dump_file.write(tokens_s)
-        # texts_tokens.append(tokens)
-        for t in tokens:
-            all_tokens_counter[t] += 1
-        for t in set(tokens):
-            df_tokens[t] += 1
-        # all_tokens += tokens
-        # df_tokens += set(tokens)
-    dump_file.close()
-    temp_file_name = dump_file.name
-    len_texts = i+1
-    return all_tokens_counter, df_tokens, len_texts, iter_texts_tokens(temp_file_name)
+            raise Exception(f'type {dtype} not supported.')
+        self.dtype = dtype
+        self.shape = shape
+        self.type_flag = type_flag
+
+        self.rows = array.array('i')
+        self.cols = array.array('i')
+        self.data = array.array(type_flag)
+        self.matrix = scipy.sparse.coo_matrix(shape, dtype=dtype)
+
+    def append(self, i, j, v):
+        m, n = self.shape
+        if (i >= m or j >= n):
+            raise Exception('Index out of bounds')
+        self.rows.append(i)
+        self.cols.append(j)
+        self.data.append(v)
+        self._check_buffer()
+
+    def extend(self, is_, js, vs):
+        assert len(is_) == len(js)
+        assert len(vs) == len(js)
+        self.rows.extend(is_)
+        self.cols.extend(js)
+        self.data.extend(vs)
+        self._check_buffer()
+
+    def _flush(self):
+        rows = np.frombuffer(self.rows, dtype=np.int32)
+        cols = np.frombuffer(self.cols, dtype=np.int32)
+        data = np.frombuffer(self.data, dtype=self.dtype)
+        self.matrix += scipy.sparse.coo_matrix((data, (rows, cols)),
+                                               shape=self.shape)
+        self.matrix.sum_duplicates()
+        self.matrix.eliminate_zeros()
+        self.rows = array.array('i')
+        self.cols = array.array('i')
+        self.data = array.array(self.type_flag)
+        module_logger.debug('Matrix flushed.')
+
+    def _check_buffer(self, buffer_limit=10**8):
+        if len(self.data) > buffer_limit:
+            self._flush()
+
+    def tocoo(self):
+        self._flush()
+        return self.matrix
+
+    def __len__(self):
+        return len(self.data)
 
 
 storage_folder = config('STORAGE_FOLDER', default='/tmp/diskcache')
 cache = FanoutCache(storage_folder)
+module_logger.info(f'Storage folder: {storage_folder}')
 @cache.memoize(tag='get_co')
 def get_co(texts_or_path,
            w,
            input_type='collection',
            method='unbiased_dice',
            proximity='const',
-           # proximity_func=const_proximity,
            threshold=0,
            forms_dict=None,
-           entity=None,
            min_df=None,
            max_df=None,
-           dict_size_limit=5000,
            **kwargs):
     """
     Iterate over texts and compute co-occurrences for each term.
@@ -296,39 +275,13 @@ def get_co(texts_or_path,
     :param str method:
     :param str proximity: "linear" or "const"
     :param float threshold:
-    :param dict[str, list[str]] forms_dict: Alternative labels (synonyms)
-    :param str entity: Ignored
-    :param int min_tf: minimum doc freq in abs counts
-    :param float max_df: maximum doc freq as a ratio of the size of the corpus
-    :param int dict_size_limit:
+    :param dict[str, list[str]] or None forms_dict: Alternative labels (synonyms)
+    :param int or None min_df: minimum doc freq in abs counts
+    :param float or None max_df: maximum doc freq as a ratio of the size of the corpus
     :return: COs matrix, token name to its index in the COs matrix and inverse dict
     :rtype: (scipy.sparse.csr_matrix, dict[str, int], dict[int, str])
     """
-    def iter_from_file(path):
-        with open(path, 'rb') as f:
-            for line in f:
-                yield line.decode('ascii', errors='ignore')
-
-    def iter_from_folder(path):
-        all_file_names = [
-            os.path.join(path, fname)
-            for fname in os.listdir(path)
-            if os.path.isfile(os.path.join(path, fname))]
-        for file_path in all_file_names:
-            with open(file_path, 'rb') as f:
-                f_text = f.read()
-            yield f_text.decode('ascii', errors='ignore')
-
     module_logger.info(f'Start get_co function')
-    if input_type is not 'collection':
-        if input_type is 'file_path':
-            texts = iter_from_file(texts_or_path)
-        elif input_type is 'folder_path':
-            texts = iter_from_folder(texts_or_path)
-        else:
-            raise ValueError(f'Input type "{input_type}" is not supported.')
-    else:
-        texts = texts_or_path
 
     if proximity == 'const':
         proximity_func = lambda x: 1
@@ -338,8 +291,81 @@ def get_co(texts_or_path,
         raise ValueError(f'Proximity "{proximity}" is not supported.')
     cache = functools.lru_cache()
     proximity_func = cache(proximity_func)
-    all_tokens_counter, df_tokens, len_texts, texts_tokens = \
-        get_tokens_and_counts(texts=texts, forms_dict=forms_dict)
+
+    texts_tokens_iter, token2ind, all_tokens_counter, len_texts = \
+        texts2tokens(texts_or_path=texts_or_path,
+                     input_type=input_type,
+                     forms_dict=forms_dict, min_df=min_df, max_df=max_df)
+    module_logger.info(f'Number of tokens: {sum(all_tokens_counter.values())}')
+    module_logger.info(f'Total unique tokens: {len(token2ind)}')
+
+    t2t_prox_constructor = IncrementalCSRMatrix(
+        shape=(len(token2ind), len(token2ind)),
+        dtype=np.int32)
+    # accumulate token to token proximities over all tokenized texts
+    _10proc_texts = round(len_texts / 10)
+    for i, tokens in enumerate(texts_tokens_iter):
+        new_rows, new_cols, new_data = get_t2t_proximities(
+            tokens, token2ind, w, proximity_func)
+        t2t_prox_constructor.extend(new_rows, new_cols, new_data)
+        if _10proc_texts > 0 and i % _10proc_texts == 0:
+            s = f'{i+1} out of {len_texts} texts done ' \
+                f'({round(i/_10proc_texts)*10}%). ' \
+                f'{len(t2t_prox_constructor.data)} edges.'
+            module_logger.info(s)
+    else:
+        t2t_prox = t2t_prox_constructor.tocoo()
+        module_logger.info('All done')
+
+    n_all_tokens = sum(all_tokens_counter.values())
+    params = (n_all_tokens, all_tokens_counter, threshold, w)
+    if method == 'dice':
+        func_method = get_dice_scores
+    elif method == 'unbiased_dice':
+        func_method = get_unbiased_dice_scores
+    else:
+        raise Exception('Method {} is not supported'.format(method))
+
+    ind2token = {ind: token for token, ind in token2ind.items()}
+    _10proc_tokens = round(len(token2ind) / 10)
+    co_scores_constructor = IncrementalCSRMatrix(
+        shape=(len(token2ind), len(token2ind)),
+        dtype=np.float32)
+    for i, (token, token_ind) in enumerate(token2ind.items()):
+        token_params = (t2t_prox, token2ind, ind2token, token) + params
+        new_rows, new_cols, new_data = func_method(*token_params, **kwargs)
+        co_scores_constructor.extend(new_rows, new_cols, new_data)
+        if _10proc_tokens > 0 and i % _10proc_tokens == 0:
+            s = f'{i + 1} out of {len(token2ind)} tokens done ' \
+                f'({round(i / _10proc_tokens)*10}%). ' \
+                f'{len(co_scores_constructor.data)} edges.'
+            module_logger.info(s)
+    else:
+        co_scores = co_scores_constructor.tocoo()
+        module_logger.info('All done')
+    module_logger.info(f'Total unique tokens: {len(token2ind)}, '
+                       f'total COs: {len(co_scores.data)}')
+    return co_scores, token2ind, ind2token
+
+
+def texts2tokens(texts_or_path,
+                 input_type='collection', forms_dict=None,
+                 min_df=None, max_df=None):
+    """
+
+    :param (list[str] or str) texts_or_path: iter of texts or a path to texts
+    :param str input_type: "file_path", "folder_path" or "collection".
+    :param dict[str, list[str]] or None forms_dict: Alternative labels (synonyms)
+    :param int or None min_df: minimum doc freq in abs counts
+    :param float or None max_df: maximum doc freq as a ratio of the size of the corpus
+    :return: texts_tokens_iter, token2ind, all_tokens_counter
+    :rtype: (iter[str], dict[str, int], Counter[str, int], int)
+    """
+    all_tokens_counter, df_tokens, len_texts, texts_tokens_fn = \
+        get_tokens_and_counts(texts_or_path=texts_or_path,
+                              input_type=input_type,
+                              forms_dict=forms_dict)
+    texts_tokens_iter = iter_texts_tokens(texts_tokens_fn)
     # filter out rare tokens if min term freq is provided
     if min_df is not None:
         df_tokens_filter = {
@@ -351,7 +377,7 @@ def get_co(texts_or_path,
         df_tokens_filter = dict(df_tokens)
     # filter out frequent token if max df is provided
     if max_df is not None:
-        df_limit = len_texts*max_df
+        df_limit = len_texts * max_df
         df_tokens_filter = {
             token: freq
             for token, freq in df_tokens_filter.items()
@@ -359,93 +385,74 @@ def get_co(texts_or_path,
         }
     else:
         df_tokens_filter = dict(df_tokens_filter)
-    module_logger.info(f'Number of tokens: {sum(df_tokens_filter.values())}')
-    module_logger.info(f'Total unique tokens: {len(df_tokens_filter)}')
     tokens_set = set(df_tokens_filter)
-
-    t2t_prox = scipy.sparse.csr_matrix((len(tokens_set), len(tokens_set)))
     token2ind = {token: i for i, token in enumerate(tokens_set)}
-    t2t_cos = defaultdict(lambda: defaultdict(float))
-    # accumulate token to token proximities over all tokenized texts
-    _10proc_texts = round(len_texts / 10)
-    for i, tokens in enumerate(texts_tokens):
-        t2t_cos = get_t2t_proximities(tokens, w, proximity_func, tokens_set,
-                                      t2t_cos=t2t_cos)
-        if len(t2t_cos) > dict_size_limit:
-            rows, cols, data = dict2rcd(t2t_cos, token2ind)
-            t2t_prox += scipy.sparse.csr_matrix(
-                (data, (rows, cols)),
-                shape=(len(token2ind), len(token2ind))
-            )
-            t2t_cos.clear()
-        if _10proc_texts > 0 and i % _10proc_texts == 0:
-            module_logger.info('{} out of {} texts done'.format(i, len_texts))
-    else:
-        rows, cols, data = dict2rcd(t2t_cos, token2ind)
-        t2t_prox += scipy.sparse.csr_matrix(
-            (data, (rows, cols)),
-            shape=(len(token2ind), len(token2ind))
-        )
-        t2t_cos.clear()
-        module_logger.info('All done')
+    return texts_tokens_iter, token2ind, all_tokens_counter, len_texts
 
-    n_all_tokens = sum(all_tokens_counter.values())
-    params = (n_all_tokens, all_tokens_counter, threshold, w)
-    if method == 'binom':
-        func_method = get_binom_scores
-    elif method == 'dice':
-        func_method = get_dice_scores
-    elif method == 'unbiased_dice':
-        func_method = get_unbiased_dice_scores
-    else:
-        raise Exception('Method {} is not supported'.format(method))
 
-    rows = []
-    cols = []
-    data = []
-    ind2token = {ind: token for token, ind in token2ind.items()}
-    co_scores = scipy.sparse.csr_matrix(
-        (len(tokens_set), len(tokens_set)),
-        dtype=np.float16)
-    _10proc_tokens = round(len(token2ind) / 10)
-    for i, (token, token_ind) in enumerate(token2ind.items()):
-        token_cos_dict = get_co_dict(t2t_prox, token2ind, ind2token, token)
-        token_params = (token_cos_dict, all_tokens_counter[token]) + params
-        co_scores_dict = func_method(*token_params, **kwargs)
-        for k1, v in co_scores_dict.items():
-            rows.append(token_ind)
-            cols.append(token2ind[k1])
-            data.append(v)
-        co_scores_dict.clear()
-        token_cos_dict.clear()
-        if len(data) > dict_size_limit*100:
-            co_scores += scipy.sparse.csr_matrix(
-                (data, (rows, cols)),
-                shape=(len(tokens_set), len(tokens_set)),
-                dtype=np.float16
-            )
-            t2t_cos.clear()
-            rows.clear()
-            cols.clear()
-            data.clear()
-        if _10proc_tokens > 0 and i % _10proc_tokens == 0:
-            module_logger.info('{} out of {} tokens done'.format(i, len(token2ind)))
+def iter_texts_tokens(dump_file_name):
+    with open(dump_file_name) as f:
+        for line in f:
+            yield line.split(', ')
+
+
+@cache.memoize(tag='get_tokens_and_counts')
+def get_tokens_and_counts(texts_or_path, input_type, forms_dict=None):
+    """
+
+    :param (list[str] or str) texts_or_path: iter of texts or a path to texts
+    :param str input_type: "file_path", "folder_path" or "collection".
+    :param dict[str, list[str]] forms_dict: Alternative labels (synonyms)
+    """
+    def iter_from_folder(path):
+        all_file_names = [
+            os.path.join(path, fname)
+            for fname in os.listdir(path)
+            if os.path.isfile(os.path.join(path, fname))]
+        for file_path in all_file_names:
+            with open(file_path, 'rb') as f:
+                f_text = f.read()
+            yield f_text.decode('ascii', errors='ignore')
+
+    def iter_from_file(path):
+        with open(path, 'rb') as f:
+            for line in f:
+                yield line.decode('ascii', errors='ignore')
+
+    if input_type is not 'collection':
+        if input_type is 'file_path':
+            texts = iter_from_file(texts_or_path)
+        elif input_type is 'folder_path':
+            texts = iter_from_folder(texts_or_path)
+        else:
+            raise ValueError(f'Input type "{input_type}" is not supported.')
     else:
-        co_scores += scipy.sparse.csr_matrix(
-            (data, (rows, cols)),
-            shape=(len(tokens_set), len(tokens_set)),
-            dtype=np.float16
-        )
-        t2t_cos.clear()
-        rows.clear()
-        cols.clear()
-        data.clear()
-        module_logger.info('All done')
-    module_logger.info(f'Total unique tokens: {len(tokens_set)}, '
-                       f'total COs: {len(data)}')
-    # data = np.asarray(data, dtype=np.float16)
-    # co_scores = scipy.sparse.csr_matrix(
-    #     (data, (rows, cols)),
-    #     shape=(len(tokens_set), len(tokens_set)),
-    #     dtype=np.float16)
-    return co_scores, token2ind, ind2token
+        texts = texts_or_path
+
+    all_tokens_counter = Counter()
+    df_tokens = Counter()
+    # dump_file = NamedTemporaryFile(mode='w+', delete=False)
+    filename = str(uuid.uuid4())
+    dump_file_name = os.path.join(storage_folder, filename)
+    with open(dump_file_name, mode='w+') as dump_file:
+        # tokenize and count tokens
+        for i, text in enumerate(texts):
+            if forms_dict:
+                for form in forms_dict.keys():
+                    subed_text = re.sub(form, forms_dict[form], text)
+            else:
+                subed_text = text
+            tokens = word_tokenize(subed_text)
+            tokens_s = ', '.join(tokens) + '\n'
+            dump_file.write(tokens_s)
+            # texts_tokens.append(tokens)
+            for t in tokens:
+                all_tokens_counter[t] += 1
+            for t in set(tokens):
+                df_tokens[t] += 1
+            # all_tokens += tokens
+            # df_tokens += set(tokens)
+    # dump_file.close()
+    # temp_file_name = dump_file.name
+    len_texts = i+1
+    return all_tokens_counter, df_tokens, len_texts, dump_file_name

@@ -7,6 +7,7 @@ import math
 import wsid.preprocess as preproc
 import doc_to_text.doc_to_text as doc2text
 from wsid.cooccurrence import *
+from wsid.cooccurrence import get_tokens_and_counts
 
 testdata_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                              'data')
@@ -29,18 +30,6 @@ class TestCooccurrence:
             os.path.join(testdata_path, 'cinnamon.doc'))
         self.python_text = doc2text.doc_to_text(
             os.path.join(testdata_path, 'python_text.txt'))
-
-    def test_calculate(self):
-        words = self.text.split()
-        words_counter = Counter(words)
-        t2t_cos = get_t2t_proximities(self.text, 10, proximity_func=lambda x: 1)
-        relevant_words = t2t_cos['A']
-        entity_occurs = len([x for x in words if x == 'A'])
-        p_co = sum(relevant_words.values()) / (len(words) - entity_occurs)
-        score = _calculate_z_score(words_counter, 'B', p_co, relevant_words)
-        print('A and B cooc score = ', score)
-        assert score > 5
-        assert score < 10
 
     def test_get_co(self):
         entity = 'title'
@@ -67,59 +56,34 @@ class TestCooccurrence:
         cinnamon_text = preproc.eliminate_shortwords(
             preproc.eliminate_symbols(self.cinnamon_text.lower())
         )
+        texts_tokens_iter, token2ind, all_tokens_counter, len_texts = \
+            texts2tokens(texts_or_path=[cinnamon_text])
         relevant_words = \
             get_t2t_proximities(
-                cinnamon_text, w,
-                proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w)
-        relevant_words = relevant_words[entity]
-        assert len(relevant_words) <= 2*w + cinnamon_text.count(entity)
-
-    def test_relevant_words_symmetry1(self):
-        entity = 'the'
-        cinnamon_text = preproc.eliminate_shortwords(
-            preproc.eliminate_symbols(self.cinnamon_text.lower())
-        )
-        w = 20
-        relevant_words_score = \
-            get_t2t_proximities(
-                cinnamon_text, w,
-                proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w
+                next(texts_tokens_iter), token2ind, w,
+                # proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w,
+                return_dict=True
             )
-        for rel_word in relevant_words_score[entity]:
-            assert (relevant_words_score[entity][rel_word] ==
-                    relevant_words_score[rel_word][entity])
+        relevant_words = relevant_words[entity]
+        assert len(relevant_words) <= 2*w*cinnamon_text.count(entity), (len(relevant_words), cinnamon_text.count(entity))
 
-    def test_relevant_words_symmetry2(self):
+    def test_relevant_words_symmetry(self):
         entity = 'title'
         sample_text = preproc.eliminate_shortwords(
             preproc.eliminate_symbols(self.sample_text.lower())
         )
         w = 20
+        texts_tokens_iter, token2ind, all_tokens_counter, len_texts = \
+            texts2tokens(texts_or_path=[sample_text])
         relevant_words_score = \
             get_t2t_proximities(
-                sample_text, w,
-                proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w
+                next(texts_tokens_iter), token2ind, w,
+                proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w,
+                return_dict=True
             )
         for rel_word in relevant_words_score[entity]:
             assert (relevant_words_score[entity][rel_word] ==
                     relevant_words_score[rel_word][entity])
-
-
-    # def test_binom_co_with_proximity(self):
-    #     def lin_prox(x):
-    #         return (w - abs(x) + .5) * 2 / w
-    #
-    #     entity = 'powder'
-    #     w = 20
-    #     cos, t2i, i2t = get_co([self.cinnamon_text], w)
-    #     co_terms = get_co_tokens(cos, t2i, i2t, entity)
-    #     cos_prox, t2i, i2t = get_co([self.cinnamon_text], w,
-    #                                 proximity_func=lin_prox)
-    #     co_terms_prox = get_co_tokens(cos_prox, t2i, i2t, entity)
-    #     print('Co terms: ', co_terms)
-    #     print('Co terms proximity: ', co_terms_prox)
-    #     assert len(co_terms_prox) < len(co_terms)
-
 
     def test_dice_co(self):
         entity = 'powder'
