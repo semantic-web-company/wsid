@@ -189,7 +189,7 @@ def get_unbiased_dice_scores(t2t_prox,
     return ans_rows, ans_cols, ans_data
 
 
-class IncrementalCSRMatrix(object):
+class IncrementalSparseMatrix(object):
     def __init__(self, shape, dtype):
         if dtype is np.int32:
             type_flag = 'i'
@@ -248,6 +248,10 @@ class IncrementalCSRMatrix(object):
         self._flush()
         return self.matrix
 
+    def tocsr(self):
+        self._flush()
+        return self.matrix.tocsr()
+
     def __len__(self):
         return len(self.data)
 
@@ -299,7 +303,7 @@ def get_co(texts_or_path,
     module_logger.info(f'Number of tokens: {sum(all_tokens_counter.values())}')
     module_logger.info(f'Total unique tokens: {len(token2ind)}')
 
-    t2t_prox_constructor = IncrementalCSRMatrix(
+    t2t_prox_constructor = IncrementalSparseMatrix(
         shape=(len(token2ind), len(token2ind)),
         dtype=np.int32)
     # accumulate token to token proximities over all tokenized texts
@@ -314,7 +318,7 @@ def get_co(texts_or_path,
                 f'{len(t2t_prox_constructor.data)} edges.'
             module_logger.info(s)
     else:
-        t2t_prox = t2t_prox_constructor.tocoo()
+        t2t_prox = t2t_prox_constructor.tocsr()
         module_logger.info('All done')
 
     n_all_tokens = sum(all_tokens_counter.values())
@@ -328,7 +332,7 @@ def get_co(texts_or_path,
 
     ind2token = {ind: token for token, ind in token2ind.items()}
     _10proc_tokens = round(len(token2ind) / 10)
-    co_scores_constructor = IncrementalCSRMatrix(
+    co_scores_constructor = IncrementalSparseMatrix(
         shape=(len(token2ind), len(token2ind)),
         dtype=np.float32)
     for i, (token, token_ind) in enumerate(token2ind.items()):
@@ -341,7 +345,7 @@ def get_co(texts_or_path,
                 f'{len(co_scores_constructor.data)} edges.'
             module_logger.info(s)
     else:
-        co_scores = co_scores_constructor.tocoo()
+        co_scores = co_scores_constructor.tocsr()
         module_logger.info('All done')
     module_logger.info(f'Total unique tokens: {len(token2ind)}, '
                        f'total COs: {len(co_scores.data)}')
