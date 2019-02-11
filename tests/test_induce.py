@@ -21,8 +21,7 @@ class TestInduce:
     def test_get_graph(self):
         G, e_es = induce.get_co_graph_dict(
             self.cos, self.t2i, self.i2t,
-            order_2_cos=list(self.t2i.keys()),
-            canonical_entity_form='add')
+            order_2_cos=list(self.t2i.keys()))
         assert G
 
     def test_induce(self):

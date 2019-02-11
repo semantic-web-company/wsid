@@ -1,6 +1,7 @@
 import functools
 import logging
 import scipy.sparse
+import numpy as np
 import time
 
 import igraph as ig
@@ -47,12 +48,11 @@ class EntityCoOccurrences:
     #     return graph_wo_e
 
     @property
-    # @functools.lru_cache()
     def graph(self):
         if self._co_dict is None:
             graph, co_dict = get_co_graph_dict(self.cos_mx, self.token2ind,
                                                self.ind2token,
-                                               self.order2_cos, self.entity_str)
+                                               self.order2_cos)
             self._graph = graph
             self._co_dict = co_dict
         # graph, co_dict = get_co_graph_dict(self.cos_mx, self.token2ind,
@@ -72,12 +72,11 @@ class EntityCoOccurrences:
                 return 0
 
     @property
-    # @functools.lru_cache()
     def co_dict(self):
         if self._co_dict is None:
             graph, co_dict = get_co_graph_dict(self.cos_mx, self.token2ind,
                                                self.ind2token,
-                                               self.order2_cos, self.entity_str)
+                                               self.order2_cos)
             self._graph = graph
             self._co_dict = co_dict
         # adjlist = self.graph.get_adjlist()
@@ -132,61 +131,62 @@ class EntityCoOccurrences:
         return order_2_cos
 
 
-def get_co_graph_dict(cos, token2ind, ind2token, order_2_cos, canonical_entity_form,
+def get_co_graph_dict(cos, token2ind, ind2token, order_2_cos,
                       co_average_score_th=2.5):
     """
 
+    :param float co_average_score_th:
     :param scipy.sparse.csr_matrix cos:
     :param dict[str, int] token2ind:
     :param dict[int, str] ind2token:
     :param list[str] order_2_cos:
-    :param str canonical_entity_form:
     :return: co-oc graph including entity
     :rtype: igraph.Graph
     """
+    def normalize_vals(mx):
+        denom_v = mx.sum(axis=0).A1
+        ans_mx = scipy.sparse.csr_matrix(mx / denom_v)
+        return ans_mx
+
     start = time.time()
     V = set(order_2_cos)
     V_inds = [token2ind[x] for x in V]
-    cos_inds2V_inds = {x: i for i, x in enumerate(V_inds)}
-    cos_V = cos[:, V_inds]
-    # prepare a graph to populate
-    G = ig.Graph(directed=True)
-    G.add_vertices(list(V))
+    V_tokens = [ind2token[i] for i in V_inds]
+
+    module_logger.info('start getting co graph and dict')
+    cos_VV = scipy.sparse.csr_matrix(cos[:, V_inds][V_inds, :])
+    cos_VV = normalize_vals(cos_VV)
+    module_logger.info('normalized')
+    co_score_th = co_average_score_th / len(V)
+    cos_VV = cos_VV.multiply(cos_VV > co_score_th)
+    module_logger.info('filtered')
+    cos_VV = normalize_vals(cos_VV)
+    cos_VV.eliminate_zeros()
+    cos_VV = cos_VV.tocoo()
+    module_logger.info('COs matrix ready')
+
+    edgelist = list(zip(cos_VV.row.tolist(), cos_VV.col.tolist()))
+    module_logger.info(f'edgelist done, size = {len(edgelist)}')
+    weights = cos_VV.data.tolist()
+    graph = ig.Graph(edgelist,
+                     edge_attrs={'weight': weights},
+                     vertex_attrs={'name': V_tokens},
+                     directed=True)
+    module_logger.info('graph done')
     co_dict = dict()
-    edges = []
-    weights = []
-    for e, co1 in enumerate(V):
-        co1_ind = token2ind[co1]
-        # normalize so that the sum of all edges outcoming from a token in V to other tokens in V is 1
-        denom = cos_V.getrow(co1_ind).sum()
-        co1_row_denom = (cos_V.getrow(co1_ind) / denom).toarray()[0]
-        co1_cos = {ind2token[V_inds[i]] for i in
-                   cos_V.getrow(co1_ind).indices}
-        for co2 in co1_cos:
-            co_score = co1_row_denom[cos_inds2V_inds[token2ind[co2]]]
-            if co2 != canonical_entity_form:
-                if co_score > co_average_score_th / len(V):
-                    edges.append((co1, co2))
-                    weights.append(co_score)
-                    try:
-                        co_dict[co1][co2] = co_score
-                    except KeyError:
-                        co_dict[co1] = {co2: co_score}
-            else:  # co2 is entity
-                edges.append((co1, co2))
-                co_score = co1_row_denom[cos_inds2V_inds[token2ind[co2]]]
-                weights.append(co_score)
-                try:
-                    co_dict[co1][co2] = co_score
-                except KeyError:
-                    co_dict[co1] = {co2: co_score}
-    G.add_edges(edges)
-    G.es['weight'] = weights
+    for e, w in zip(edgelist, weights):
+        source = V_tokens[e[0]]
+        target = V_tokens[e[1]]
+        try:
+            co_dict[source][target] = w
+        except KeyError:
+            co_dict[source] = {target: w}
+
     co_co_time = time.time()
     module_logger.info(f'Graph done in {co_co_time - start:0.3f}s')
-    module_logger.info(f'Number of nodes: {len(G.vs)}, '
-                        f'number of edges: {len(G.es)}')
-    return G, co_dict
+    module_logger.info(f'Number of nodes: {len(graph.vs)}, '
+                        f'number of edges: {len(graph.es)}')
+    return graph, co_dict
 
 
 def get_hubs(entity_str, cos, token2ind, ind2token, th_hub, broader_groups=()):
@@ -225,8 +225,8 @@ def get_hubs(entity_str, cos, token2ind, ind2token, th_hub, broader_groups=()):
                 hub_neighbors = ({e_cos.graph.vs['name'][x] for x in e_cos.graph.predecessors(br_hub)} | {br_hub}) - {e_cos.entity_str}
                 hub_involvement = {
                     n:
-                        sum(e_cos.co_func(n, z) for z in set(e_cos.co_dict[n].keys()) & hub_neighbors) /
-                        sum(e_cos.co_func(n, z) for z in set(e_cos.co_dict[n].keys()))
+                        sum(e_cos.co_func(n, z) for z in set(e_cos.co_dict[n].keys()) & hub_neighbors) #/
+                        # sum(e_cos.co_func(n, z) for z in set(e_cos.co_dict[n].keys()))
                     for n in {n2 #e_cos.graph_wo_e.vs['name'][n2]
                               for n1 in hub_neighbors
                               for n2 in e_cos.co_dict[n1]
@@ -324,3 +324,4 @@ def get_hubs(entity_str, cos, token2ind, ind2token, th_hub, broader_groups=()):
     clusters += other_clusters
 
     return hubs, clusters, e_cos
+

@@ -240,7 +240,7 @@ class IncrementalSparseMatrix(object):
         self.data = array.array(self.type_flag)
         module_logger.debug('Matrix flushed.')
 
-    def _check_buffer(self, buffer_limit=10**8):
+    def _check_buffer(self, buffer_limit=config('RAM_LIMIT_GB', cast=int, default=1)*(10**7)):
         if len(self.data) > buffer_limit:
             self._flush()
 
@@ -256,10 +256,9 @@ class IncrementalSparseMatrix(object):
         return len(self.data)
 
 
-storage_folder = config('STORAGE_FOLDER', default='/tmp/diskcache')
-cache = FanoutCache(storage_folder)
-module_logger.info(f'Storage folder: {storage_folder}')
-@cache.memoize(tag='get_co')
+storage_folder_co = config('STORAGE_FOLDER', default='/tmp/diskcache')
+cache_co = FanoutCache(storage_folder_co)
+@cache_co.memoize(tag='get_co')
 def get_co(texts_or_path,
            w,
            input_type='collection',
@@ -286,6 +285,7 @@ def get_co(texts_or_path,
     :rtype: (scipy.sparse.csr_matrix, dict[str, int], dict[int, str])
     """
     module_logger.info(f'Start get_co function')
+    module_logger.info(f'Storage folder: {storage_folder_co}')
 
     if proximity == 'const':
         proximity_func = lambda x: 1
@@ -315,7 +315,7 @@ def get_co(texts_or_path,
         if _10proc_texts > 0 and i % _10proc_texts == 0:
             s = f'{i+1} out of {len_texts} texts done ' \
                 f'({round(i/_10proc_texts)*10}%). ' \
-                f'{len(t2t_prox_constructor.data)} edges.'
+                f'{len(t2t_prox_constructor.matrix.data)} edges.'
             module_logger.info(s)
     else:
         t2t_prox = t2t_prox_constructor.tocsr()
@@ -342,7 +342,7 @@ def get_co(texts_or_path,
         if _10proc_tokens > 0 and i % _10proc_tokens == 0:
             s = f'{i + 1} out of {len(token2ind)} tokens done ' \
                 f'({round(i / _10proc_tokens)*10}%). ' \
-                f'{len(co_scores_constructor.data)} edges.'
+                f'{len(co_scores_constructor.matrix.data)} edges.'
             module_logger.info(s)
     else:
         co_scores = co_scores_constructor.tocsr()
@@ -400,7 +400,10 @@ def iter_texts_tokens(dump_file_name):
             yield line.split(', ')
 
 
-@cache.memoize(tag='get_tokens_and_counts')
+storage_folder_tokens_counts = os.path.join(storage_folder_co,
+                                            'tokens_and_counts')
+cache_tc = FanoutCache(storage_folder_tokens_counts)
+@cache_tc.memoize(tag='get_tokens_and_counts')
 def get_tokens_and_counts(texts_or_path, input_type, forms_dict=None):
     """
 
@@ -437,7 +440,7 @@ def get_tokens_and_counts(texts_or_path, input_type, forms_dict=None):
     df_tokens = Counter()
     # dump_file = NamedTemporaryFile(mode='w+', delete=False)
     filename = str(uuid.uuid4())
-    dump_file_name = os.path.join(storage_folder, filename)
+    dump_file_name = os.path.join(storage_folder_co, filename)
     with open(dump_file_name, mode='w+') as dump_file:
         # tokenize and count tokens
         for i, text in enumerate(texts):
