@@ -257,8 +257,8 @@ class IncrementalSparseMatrix(object):
 
 
 storage_folder_co = config('STORAGE_FOLDER', default='/tmp/diskcache')
-cache_co = FanoutCache(storage_folder_co)
-@cache_co.memoize(tag='get_co', timeout=10.0)
+cache_co = FanoutCache(storage_folder_co, timeout=10.0)
+@cache_co.memoize(tag='get_co')
 def get_co(texts_or_path,
            w,
            input_type='collection',
