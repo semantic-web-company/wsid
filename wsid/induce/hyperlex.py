@@ -153,17 +153,14 @@ def get_co_graph_dict(cos, token2ind, ind2token, order_2_cos,
     V_inds = [token2ind[x] for x in V]
     V_tokens = [ind2token[i] for i in V_inds]
 
-    module_logger.info('start getting co graph and dict')
     cos_VV = scipy.sparse.csr_matrix(cos[:, V_inds][V_inds, :])
     cos_VV = normalize_vals(cos_VV)
-    module_logger.info('normalized')
     co_score_th = co_average_score_th / len(V)
     cos_VV = cos_VV.multiply(cos_VV > co_score_th)
-    module_logger.info('filtered')
     cos_VV = normalize_vals(cos_VV)
     cos_VV.eliminate_zeros()
     cos_VV = cos_VV.tocoo()
-    module_logger.info('COs matrix ready')
+    module_logger.info(f'CO matrix done, size = {len(cos_VV.data)}')
 
     edgelist = list(zip(cos_VV.row.tolist(), cos_VV.col.tolist()))
     module_logger.info(f'edgelist done, size = {len(edgelist)}')
@@ -185,7 +182,7 @@ def get_co_graph_dict(cos, token2ind, ind2token, order_2_cos,
     co_co_time = time.time()
     module_logger.info(f'Graph done in {co_co_time - start:0.3f}s')
     module_logger.info(f'Number of nodes: {len(graph.vs)}, '
-                        f'number of edges: {len(graph.es)}')
+                       f'number of edges: {len(graph.es)}')
     return graph, co_dict
 
 
@@ -212,7 +209,6 @@ def get_hubs(entity_str, cos, token2ind, ind2token, th_hub, broader_groups=()):
         clusters = []
         candidates = (set(e_cos.co_dict[e_cos.entity_str]) | {x for x in broaders if x in e_cos.pr}) - {e_cos.entity_str}
         ranking = get_ranking(candidates, scoring_func)
-        # ranking = get_ranking(e_cos.graph_wo_e.vs['name'], scoring_func)  # TODO: better pre-filtering
         while True:
             br_hub, initital_score = ranking.pop(0)
             score = scoring_func(br_hub)

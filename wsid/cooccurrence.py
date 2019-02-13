@@ -258,7 +258,7 @@ class IncrementalSparseMatrix(object):
 
 storage_folder_co = config('STORAGE_FOLDER', default='/tmp/diskcache')
 cache_co = FanoutCache(storage_folder_co)
-@cache_co.memoize(tag='get_co')
+@cache_co.memoize(tag='get_co', maxsize=None, timeout=10.0)
 def get_co(texts_or_path,
            w,
            input_type='collection',
@@ -305,7 +305,7 @@ def get_co(texts_or_path,
 
     t2t_prox_constructor = IncrementalSparseMatrix(
         shape=(len(token2ind), len(token2ind)),
-        dtype=np.int32)
+        dtype=np.float32)
     # accumulate token to token proximities over all tokenized texts
     _10proc_texts = round(len_texts / 10)
     for i, tokens in enumerate(texts_tokens_iter):
