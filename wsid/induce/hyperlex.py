@@ -40,13 +40,6 @@ class EntityCoOccurrences:
         module_logger.info(f'Pagerank done in {time.time()-start_pr:0.3f}s')
         return pr
 
-    # @property
-    # @functools.lru_cache()
-    # def graph_wo_e(self):
-    #     graph_wo_e = self.graph.copy()
-    #     graph_wo_e.delete_vertices(self.entity_str)
-    #     return graph_wo_e
-
     @property
     def graph(self):
         if self._co_dict is None:
@@ -55,11 +48,6 @@ class EntityCoOccurrences:
                                                self.order2_cos)
             self._graph = graph
             self._co_dict = co_dict
-        # graph, co_dict = get_co_graph_dict(self.cos_mx, self.token2ind,
-        #                                    self.ind2token,
-        #                                    self.order2_cos, self.entity_str)
-        # assert not any(x is None for x in graph.es['weight']), \
-        #     [i for i, x in enumerate(graph.es['weight']) if x is None]
         return self._graph
 
     def co_func(self, n1, n2):
@@ -79,18 +67,6 @@ class EntityCoOccurrences:
                                                self.order2_cos)
             self._graph = graph
             self._co_dict = co_dict
-        # adjlist = self.graph.get_adjlist()
-        # for token_str, adj_inds in zip(self.graph.vs['name'], adjlist):
-        #     ans[token_str] = {self.graph.vs['name'][ind] for ind in adj_inds}
-        # ans = dict()
-        # edges = self.graph.get_edgelist()
-        # weights = self.graph.es['weight']
-        # for e, w in zip(edges, weights):
-        #     s, t = self.graph.vs['name'][e[0]], self.graph.vs['name'][e[1]]
-        #     try:
-        #         ans[s][t] = w
-        #     except KeyError:
-        #         ans[s] = {t: w}
         return self._co_dict
 
     def get_order2_cos_around_entity(self, neigh_divider=20):
@@ -244,44 +220,6 @@ def get_hubs(entity_str, cos, token2ind, ind2token, th_hub, broader_groups=()):
             elif initital_score < th_hub:
                 break
         return hubs, clusters, left_nodes
-
-    # @functools.lru_cache()
-    # def co_func(n1, n2):
-    #     if n1 == n2:
-    #         return 1
-    #     else:
-    #         try:
-    #             return e_cos.co_dict[n1][n2]
-    #         except KeyError:
-    #             return 0
-
-    # def get_sns(G, n):
-    #     """
-    #     Get successor names.
-    #     :param igraph.Graph G:
-    #     :param str n:node name
-    #     :rtype: set
-    #     """
-    #     s_ids = G.successors(n)
-    #     return {ind2token[i] for i in s_ids}
-
-    # def to_dict(graph):
-    #     ans = dict()
-    #     edges = graph.get_edgelist()
-    #     weights = graph.es['weight']
-    #     for e, w in zip(edges, weights):
-    #         s, t = ind2token[e[0]], ind2token[e[1]]
-    #         try:
-    #             ans[s][t] = w
-    #         except KeyError:
-    #             ans[s] = {t: w}
-    #     return ans
-
-    # G = G_w_entity.copy()
-    # G.delete_vertices([entity_form])
-    # token2ind = {name: i for i, name in enumerate(G_w_entity.vs['name'])}
-    # ind2token = {i: name for name, i in token2ind.items()}
-    # co_dict = to_dict(G_w_entity)
 
     e_cos = EntityCoOccurrences(entity_str=entity_str, cos=cos,
                                 token2ind=token2ind, ind2token=ind2token)

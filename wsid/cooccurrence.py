@@ -5,8 +5,6 @@ import pickle
 import re
 import uuid
 from collections import Counter, defaultdict
-from tempfile import NamedTemporaryFile
-from pathlib import Path
 
 import numpy as np
 import scipy.sparse
@@ -20,6 +18,73 @@ __all__ = ['get_co',
            'texts2tokens']
 
 module_logger = logging.getLogger(__name__)
+
+
+class IncrementalSparseMatrix(object):
+    def __init__(self, shape, dtype):
+        if dtype is np.int32:
+            type_flag = 'i'
+        elif dtype is np.int64:
+            type_flag = 'l'
+        elif dtype is np.float32:
+            type_flag = 'f'
+        elif dtype is np.float64:
+            type_flag = 'd'
+        else:
+            raise Exception(f'type {dtype} not supported.')
+        self.dtype = dtype
+        self.shape = shape
+        self.type_flag = type_flag
+
+        self.rows = array.array('i')
+        self.cols = array.array('i')
+        self.data = array.array(type_flag)
+        self.matrix = scipy.sparse.coo_matrix(shape, dtype=dtype)
+
+    def append(self, i, j, v):
+        m, n = self.shape
+        if (i >= m or j >= n):
+            raise Exception('Index out of bounds')
+        self.rows.append(i)
+        self.cols.append(j)
+        self.data.append(v)
+        self._check_buffer()
+
+    def extend(self, is_, js, vs):
+        assert len(is_) == len(js)
+        assert len(vs) == len(js)
+        self.rows.extend(is_)
+        self.cols.extend(js)
+        self.data.extend(vs)
+        self._check_buffer()
+
+    def _flush(self):
+        rows = np.frombuffer(self.rows, dtype=np.int32)
+        cols = np.frombuffer(self.cols, dtype=np.int32)
+        data = np.frombuffer(self.data, dtype=self.dtype)
+        self.matrix += scipy.sparse.coo_matrix((data, (rows, cols)),
+                                               shape=self.shape)
+        self.matrix.sum_duplicates()
+        self.matrix.eliminate_zeros()
+        self.rows = array.array('i')
+        self.cols = array.array('i')
+        self.data = array.array(self.type_flag)
+        module_logger.debug('Matrix flushed.')
+
+    def _check_buffer(self, buffer_limit=config('RAM_LIMIT_GB', cast=int, default=1)*(10**7)):
+        if len(self.data) > buffer_limit:
+            self._flush()
+
+    def tocoo(self):
+        self._flush()
+        return self.matrix
+
+    def tocsr(self):
+        self._flush()
+        return self.matrix.tocsr()
+
+    def __len__(self):
+        return len(self.data)
 
 
 def load_cos(cos_path=config('COS_STORE_PATH', default=None),
@@ -189,75 +254,8 @@ def get_unbiased_dice_scores(t2t_prox,
     return ans_rows, ans_cols, ans_data
 
 
-class IncrementalSparseMatrix(object):
-    def __init__(self, shape, dtype):
-        if dtype is np.int32:
-            type_flag = 'i'
-        elif dtype is np.int64:
-            type_flag = 'l'
-        elif dtype is np.float32:
-            type_flag = 'f'
-        elif dtype is np.float64:
-            type_flag = 'd'
-        else:
-            raise Exception(f'type {dtype} not supported.')
-        self.dtype = dtype
-        self.shape = shape
-        self.type_flag = type_flag
-
-        self.rows = array.array('i')
-        self.cols = array.array('i')
-        self.data = array.array(type_flag)
-        self.matrix = scipy.sparse.coo_matrix(shape, dtype=dtype)
-
-    def append(self, i, j, v):
-        m, n = self.shape
-        if (i >= m or j >= n):
-            raise Exception('Index out of bounds')
-        self.rows.append(i)
-        self.cols.append(j)
-        self.data.append(v)
-        self._check_buffer()
-
-    def extend(self, is_, js, vs):
-        assert len(is_) == len(js)
-        assert len(vs) == len(js)
-        self.rows.extend(is_)
-        self.cols.extend(js)
-        self.data.extend(vs)
-        self._check_buffer()
-
-    def _flush(self):
-        rows = np.frombuffer(self.rows, dtype=np.int32)
-        cols = np.frombuffer(self.cols, dtype=np.int32)
-        data = np.frombuffer(self.data, dtype=self.dtype)
-        self.matrix += scipy.sparse.coo_matrix((data, (rows, cols)),
-                                               shape=self.shape)
-        self.matrix.sum_duplicates()
-        self.matrix.eliminate_zeros()
-        self.rows = array.array('i')
-        self.cols = array.array('i')
-        self.data = array.array(self.type_flag)
-        module_logger.debug('Matrix flushed.')
-
-    def _check_buffer(self, buffer_limit=config('RAM_LIMIT_GB', cast=int, default=1)*(10**7)):
-        if len(self.data) > buffer_limit:
-            self._flush()
-
-    def tocoo(self):
-        self._flush()
-        return self.matrix
-
-    def tocsr(self):
-        self._flush()
-        return self.matrix.tocsr()
-
-    def __len__(self):
-        return len(self.data)
-
-
 storage_folder_co = config('STORAGE_FOLDER', default='/tmp/diskcache')
-cache_co = FanoutCache(storage_folder_co, timeout=10.0)
+cache_co = FanoutCache(storage_folder_co, timeout=1.0)
 @cache_co.memoize(tag='get_co')
 def get_co(texts_or_path,
            w,

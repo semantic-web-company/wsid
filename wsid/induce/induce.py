@@ -36,18 +36,10 @@ def induce(cos, token2ind, ind2token, entity_str,
 
     start = time.time()
     if method == 'hyperlex':
-        # import cProfile
-        # s = '''hubs, clusters, e_cos = hyperlex.get_hubs(
-        #     entity_str, cos, token2ind, ind2token,
-        #     th_hub=1./np.log10(len(cos.nonzero()[0])),
-        #     broader_groups=broader_groups
-        # )'''
-        # cProfile.runctx(s, locals=locals(), globals=globals())
         hubs, clusters, e_cos = hyperlex.get_hubs(
             entity_str, cos, token2ind, ind2token,
-            th_hub=1./np.log10(len(cos.nonzero()[0])),  # TODO: check if this th is good
-            broader_groups=broader_groups
-        )
+            th_hub=1./np.log10(len(cos.nonzero()[0])),
+            broader_groups=broader_groups)
     else:
         raise Exception()
     module_logger.info(
