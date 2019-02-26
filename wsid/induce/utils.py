@@ -39,18 +39,18 @@ class InducedSense:
 
 
 class InducedModel:
-    def __init__(self, lemma, pos, senses, broaders):
+    def __init__(self, lemma, pos, senses, broader_groups):
         """
 
         :param str lemma:
         :param str pos:
         :param list[InducedSense] senses:
-        :param list[list[str]] broaders:
+        :param list[list[str]] broader_groups:
         """
         self.lemma = lemma
         self.pos = pos
         self.senses = senses
-        self.broaders = broaders
+        self.broader_groups = broader_groups
 
     def __str__(self, verbose=False):
         s = f'Lemma "{self.lemma}", POS = {self.pos}\n'
