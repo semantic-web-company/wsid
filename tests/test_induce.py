@@ -18,12 +18,6 @@ class TestInduce:
                            i2t_path=os.path.join(datapath, 'i2t_cos.pkl'))
         self.cos, self.t2i, self.i2t = x3
 
-    def test_get_graph(self):
-        G, e_es = induce.get_co_graph_dict(
-            self.cos, self.t2i, self.i2t,
-            order_2_cos=list(self.t2i.keys()))
-        assert G
-
     def test_induce(self):
         hubs, clusters, e_cos = induce.induce(
             entity_str='add',

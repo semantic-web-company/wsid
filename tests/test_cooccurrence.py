@@ -37,13 +37,15 @@ class TestCooccurrence:
             [self.sample_text, self.sample_text, self.sample_text],
             20
         )
-        nf_text = preproc.eliminate_shortwords(
-            preproc.eliminate_stopwords(self.sample_text)
-        )
+        nf_texts, cnt = preproc.preprocess(texts=[self.sample_text],
+                                           remove_shortwords=True,
+                                           remove_stopwords=True)
+        nf_text = nf_texts[0]
         nf_cos, nft2i, nfi2t = get_co([nf_text] * 3, 20)
-        fn_text = preproc.eliminate_stopwords(
-            preproc.eliminate_shortwords(self.sample_text)
-        )
+        fn_texts, cnt = preproc.preprocess(texts=[self.sample_text],
+                                           remove_shortwords=True,
+                                           remove_stopwords=True)
+        fn_text = fn_texts[0]
         fn_cos, fnt2i, fni2t = get_co([fn_text] * 5, 20)
         print('Sample english co terms: {}'.format(fn_cos))
         assert 'skilled' in t2i
@@ -53,34 +55,30 @@ class TestCooccurrence:
     def test_relevant_words_proximity(self):
         entity = 'powder'
         w = 20
-        cinnamon_text = preproc.eliminate_shortwords(
-            preproc.eliminate_symbols(self.cinnamon_text.lower())
-        )
+        crp, _ = preproc.preprocess(
+            texts=[self.cinnamon_text.lower()],
+            remove_shortwords=True)
+        cinnamon_text = crp[0]
         texts_tokens_iter, token2ind, all_tokens_counter, len_texts = \
             texts2tokens(texts_or_path=[cinnamon_text])
-        relevant_words = \
-            get_t2t_proximities(
-                next(texts_tokens_iter), token2ind, w,
-                # proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w,
-                return_dict=True
-            )
+        relevant_words = get_t2t_proximities(
+            next(texts_tokens_iter), token2ind, w, return_dict=True)
         relevant_words = relevant_words[entity]
-        assert len(relevant_words) <= 2*w*cinnamon_text.count(entity), (len(relevant_words), cinnamon_text.count(entity))
+        assert len(relevant_words) <= 2*w*cinnamon_text.count(entity), \
+            (len(relevant_words), cinnamon_text.count(entity))
 
     def test_relevant_words_symmetry(self):
         entity = 'title'
-        sample_text = preproc.eliminate_shortwords(
-            preproc.eliminate_symbols(self.sample_text.lower())
-        )
+        crp, _ = preproc.preprocess(
+            texts=[self.sample_text.lower()],
+            remove_shortwords=True)
+        sample_text = crp[0]
         w = 20
         texts_tokens_iter, token2ind, all_tokens_counter, len_texts = \
             texts2tokens(texts_or_path=[sample_text])
-        relevant_words_score = \
-            get_t2t_proximities(
-                next(texts_tokens_iter), token2ind, w,
-                proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w,
-                return_dict=True
-            )
+        relevant_words_score = get_t2t_proximities(
+                next(texts_tokens_iter), token2ind, w, return_dict=True,
+                proximity_func=lambda x: (w - abs(x) + 0.5) * 2 / w)
         for rel_word in relevant_words_score[entity]:
             assert (relevant_words_score[entity][rel_word] ==
                     relevant_words_score[rel_word][entity])
@@ -110,19 +108,12 @@ class TestCooccurrence:
     def test_unbiased_dice_co_symmetry(self):
         th = 0.0
         entity = r'powder'
-        cinnamon_text = preproc.eliminate_shortwords(
-            preproc.eliminate_symbols(self.cinnamon_text.lower())
-        )
+        crp, _ = preproc.preprocess([self.cinnamon_text.lower()],
+                                    remove_shortwords=True)
         w = 20
-        cos, t2i, i2t = get_co(
-            [cinnamon_text], w,
-            method='unbiased_dice',
-            threshold=th
-        )
+        cos, t2i, i2t = get_co(crp, w, method='unbiased_dice', threshold=th)
         co_terms_e = get_co_tokens(cos, t2i, i2t, entity)
         for term in co_terms_e:
-            # print(entity, term, end=' ')
-            # print(term_co[entity], co_terms[term])
             co_terms_t = get_co_tokens(cos, t2i, i2t, term)
             assert math.isclose(co_terms_e[term],
                                 co_terms_t[entity])
@@ -130,19 +121,13 @@ class TestCooccurrence:
     def test_unbiased_dice_co_symmetry2(self):
         th = 0.01
         entity = r'the'
-        cinnamon_text = preproc.eliminate_shortwords(
-            preproc.eliminate_symbols(self.cinnamon_text.lower())
-        )
+        crp, _ = preproc.preprocess([self.cinnamon_text.lower()],
+                                    remove_shortwords=False,
+                                    remove_stopwords=False)
         w = 20
-        cos, t2i, i2t = get_co(
-            [cinnamon_text], w,
-            method='unbiased_dice',
-            threshold=th
-        )
+        cos, t2i, i2t = get_co(crp, w, method='unbiased_dice', threshold=th)
         co_terms_e = get_co_tokens(cos, t2i, i2t, entity)
         for term in co_terms_e:
-            # print(entity, term, end=' ')
-            # print(term_co[entity], co_terms[term])
             co_terms_t = get_co_tokens(cos, t2i, i2t, term)
             assert math.isclose(co_terms_e[term],
                                 co_terms_t[entity])
@@ -176,21 +161,12 @@ class TestCooccurrence:
 
     def test_unbiased_dice_co_triplicate_docs(self):
         entity = 'powder'
-        cinnamon_text = preproc.eliminate_shortwords(
-            preproc.eliminate_symbols(self.cinnamon_text.lower())
-        )
+        crp, _ = preproc.preprocess([self.cinnamon_text.lower()],
+                                    remove_shortwords=True)
         w = 20
-        cos, t2i, i2t = get_co(
-            [cinnamon_text], w,
-            method='unbiased_dice',
-            threshold=0.0
-        )
+        cos, t2i, i2t = get_co(crp, w, method='unbiased_dice', threshold=0.0)
         co_terms1 = get_co_tokens(cos, t2i, i2t, entity)
-        cos, t2i, i2t = get_co(
-            [cinnamon_text]*10, w,
-            method='unbiased_dice',
-            threshold=0.0
-        )
+        cos, t2i, i2t = get_co(crp*10, w, method='unbiased_dice', threshold=0.0)
         co_terms10 = get_co_tokens(cos, t2i, i2t, entity)
         ratios = []
         for term in co_terms1:

@@ -38,7 +38,7 @@ def induce(cos, token2ind, ind2token, entity_str,
     if method == 'hyperlex':
         hubs, clusters, e_cos = hyperlex.get_hubs(
             entity_str, cos, token2ind, ind2token,
-            th_hub=1./np.log10(len(cos.nonzero()[0])),
+            th_hub=1./np.log10(cos.count_nonzero()),
             broader_groups=broader_groups)
     else:
         raise Exception()
