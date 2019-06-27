@@ -255,7 +255,7 @@ def get_unbiased_dice_scores(t2t_prox,
 
 
 storage_folder_co = config('STORAGE_FOLDER', default='/tmp/diskcache')
-cache_co = FanoutCache(storage_folder_co, timeout=1.0)
+cache_co = FanoutCache(storage_folder_co, eviction_policy='none')
 @cache_co.memoize(tag='get_co')
 def get_co(texts_or_path,
            w,
@@ -264,12 +264,17 @@ def get_co(texts_or_path,
            proximity='const',
            threshold=0,
            forms_dict=None,
+           necessary_tokens=None,
            min_df=None,
            max_df=None,
+           tokenize=word_tokenize,
            **kwargs):
     """
     Iterate over texts and compute co-occurrences for each term.
 
+    :param (str) -> list[str] tokenize:
+    :param (list[str] or None) necessary_tokens: tokens to be included even
+        if the DF scores are outside of (min_df, max_df)
     :param (list[str] or str) texts_or_path: iter of texts or a path to texts
     :param int w: window size
     :param str input_type: "file_path", "folder_path" or "collection".
@@ -297,7 +302,12 @@ def get_co(texts_or_path,
     texts_tokens_iter, token2ind, all_tokens_counter, len_texts = \
         texts2tokens(texts_or_path=texts_or_path,
                      input_type=input_type,
+                     tokenize=tokenize,
                      forms_dict=forms_dict, min_df=min_df, max_df=max_df)
+    if necessary_tokens is not None:
+        for token in necessary_tokens:
+            if token not in token2ind:
+                token2ind[token] = len(token2ind)
     module_logger.info(f'Number of tokens: {sum(all_tokens_counter.values())}')
     module_logger.info(f'Total unique tokens: {len(token2ind)}')
 
@@ -351,10 +361,13 @@ def get_co(texts_or_path,
 
 
 def texts2tokens(texts_or_path,
-                 input_type='collection', forms_dict=None,
+                 input_type='collection',
+                 tokenize=word_tokenize,
+                 forms_dict=None,
                  min_df=None, max_df=None):
     """
 
+    :param (str) -> list[str] tokenize:
     :param (list[str] or str) texts_or_path: iter of texts or a path to texts
     :param str input_type: "file_path", "folder_path" or "collection".
     :param dict[str, list[str]] or None forms_dict: Alternative labels (synonyms)
@@ -365,6 +378,7 @@ def texts2tokens(texts_or_path,
     """
     all_tokens_counter, df_tokens, len_texts, texts_tokens_fn = \
         get_tokens_and_counts(texts_or_path=texts_or_path,
+                              tokenize=tokenize,
                               input_type=input_type,
                               forms_dict=forms_dict)
     texts_tokens_iter = iter_texts_tokens(texts_tokens_fn)
@@ -377,6 +391,7 @@ def texts2tokens(texts_or_path,
         }
     else:
         df_tokens_filter = dict(df_tokens)
+    module_logger.debug(f'min_df = {min_df}, tokens before: {len(df_tokens)}, tokens after = {len(df_tokens_filter)}')
     # filter out frequent token if max df is provided
     if max_df is not None:
         df_limit = len_texts * max_df
@@ -387,6 +402,7 @@ def texts2tokens(texts_or_path,
         }
     else:
         df_tokens_filter = dict(df_tokens_filter)
+    module_logger.debug(f'max_df = {max_df}, tokens after = {len(df_tokens_filter)}')
     tokens_set = set(df_tokens_filter)
     token2ind = {token: i for i, token in enumerate(tokens_set)}
     return texts_tokens_iter, token2ind, all_tokens_counter, len_texts
@@ -400,12 +416,13 @@ def iter_texts_tokens(dump_file_name):
 
 storage_folder_tokens_counts = os.path.join(storage_folder_co,
                                             'tokens_and_counts')
-cache_tc = FanoutCache(storage_folder_tokens_counts)
+cache_tc = FanoutCache(storage_folder_tokens_counts, eviction_policy='none')
 @cache_tc.memoize(tag='get_tokens_and_counts')
-def get_tokens_and_counts(texts_or_path, input_type, forms_dict=None):
+def get_tokens_and_counts(texts_or_path, tokenize, input_type, forms_dict=None):
     """
 
     :param (list[str] or str) texts_or_path: iter of texts or a path to texts
+    :param (str) -> list[str] tokenize:
     :param str input_type: "file_path", "folder_path" or "collection".
     :param dict[str, list[str]] forms_dict: Alternative labels (synonyms)
     """
@@ -447,7 +464,7 @@ def get_tokens_and_counts(texts_or_path, input_type, forms_dict=None):
                     subed_text = re.sub(form, forms_dict[form], text)
             else:
                 subed_text = text
-            tokens = word_tokenize(subed_text)
+            tokens = tokenize(subed_text)
             tokens_s = ', '.join(tokens) + '\n'
             dump_file.write(tokens_s)
             # texts_tokens.append(tokens)

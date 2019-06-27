@@ -16,8 +16,8 @@ class InducedSense:
     @classmethod
     def hub2sense(cls, hub, cluster):
         hub_head, score, broaders = hub
-        sense = InducedSense(
-            hub=hub_head, score=score, broaders=broaders, cluster=cluster)
+        sense = cls(hub=hub_head, score=score,
+                    broaders=broaders, cluster=cluster)
         return sense
 
     @property

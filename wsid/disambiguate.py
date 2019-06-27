@@ -57,14 +57,36 @@ def disambiguate(text, model, entity=None, start_end_inds=None, w=10):
     if entity is None:
         assert start_end_inds is not None
         entity = text[start_end_inds[0]:start_end_inds[1]]
-    texts_tokens, token2ind, all_tokens_counter, len_texts = cooc.texts2tokens([text])
+    texts_tokens, token2ind, all_toks_cnt, len_texts = cooc.texts2tokens([text])
     tokens = next(texts_tokens)
     t2t_cos = cooc.get_t2t_proximities(tokens, token2ind, w,
                                        return_dict=True)
     context = t2t_cos[entity]
     evidences = [[x for x in context if x in sense.cluster]
                  for sense in model.senses]
-    distr = [sum(sense.cluster[x] * context[x] for x in ev)
+    distr = [ #sense.score * sum(sense.cluster[x]*context[x] for x in ev)
+             sum(sense.cluster[x]*context[x] for x in ev)
              for sense, ev in zip(model.senses, evidences)]
     # assert any(distr), context
+    return distr, evidences
+
+
+def disambiguate_list(context, model):
+    """
+
+    :param dict[str, float] context:
+    :param wsid.induce.utils.InducedModel model:
+    :return: distribution over model senses
+    :rtype: (list[float], list[list[str]])
+    """
+    # texts_tokens, token2ind, all_toks_cnt, len_texts = cooc.texts2tokens([text])
+    # tokens = next(texts_tokens)
+    # t2t_cos = cooc.get_t2t_proximities(tokens, token2ind, w,
+    #                                    return_dict=True)
+    # context = t2t_cos[entity]
+    evidences = [[x for x in context if x in sense.cluster]
+                 for sense in model.senses]
+    distr = [#sense.score * sum(sense.cluster[x]*context[x] for x in ev)
+             sum(sense.cluster[x] * context[x] for x in ev)
+             for sense, ev in zip(model.senses, evidences)]
     return distr, evidences
